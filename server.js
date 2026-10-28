@@ -98,7 +98,9 @@ async function buildPool() {
 }
 
 async function state() {
-  const bal = await getBalance(false);
+  let bal = await getBalance(false);
+  // Funded after startup? Build the pool automatically so no manual reset is needed.
+  if (pool.total === 0 && bal != null && bal - RESERVE >= 2 * MIN_REWARD) { await buildPool(); bal = await getBalance(false); }
   return {
     devnet: true,
     dryRun: DRY_RUN,

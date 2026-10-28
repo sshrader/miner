@@ -31,7 +31,7 @@ body {
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   padding-block: 20px 40px;
 }
-.wrap { max-width: 1180px; margin: 0 auto; }
+.wrap { max-width: 1760px; margin: 0 auto; }
 
 header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding-bottom: 20px; }
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -48,12 +48,20 @@ h1 { margin: 0; font: 700 30px/1 var(--font-display); letter-spacing: 0.01em; te
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .chip.on .dot { background: var(--good); }
 
-.stage { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-.sandbox { flex: 1 1 560px; min-width: 0; }
-.side { flex: 1 1 300px; min-width: 0; max-width: 420px; display: flex; flex-direction: column; gap: 16px; }
-@media (max-width: 900px) { .side { max-width: none; } }
+.stage { display: grid; grid-template-columns: 264px minmax(0, 1fr) 264px; gap: 16px; align-items: start; }
+.sandbox { grid-column: 2; grid-row: 1; min-width: 0; }
+.side.left { grid-column: 1; grid-row: 1; }
+.side.right { grid-column: 3; grid-row: 1; }
+.side { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.activity { margin-top: 16px; }
+@media (max-width: 1080px) {
+  .stage { grid-template-columns: 1fr; }
+  .sandbox, .side.left, .side.right { grid-column: 1; }
+  .sandbox { grid-row: 1; } .side.left { grid-row: 2; } .side.right { grid-row: 3; }
+  .side { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
 
-.view { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 11; border: 2px solid var(--line); border-radius: 6px; overflow: hidden; background: #07060B; }
+.view { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; max-height: 84vh; min-height: 340px; border: 2px solid var(--line); border-radius: 6px; overflow: hidden; background: #07060B; }
 canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 canvas:active { cursor: grabbing; }
 .hint, .lvl { position: absolute; font: 500 12px var(--font-mono); color: #E9E5F2; background: rgba(8, 7, 12, 0.72); padding: 5px 10px; border-radius: 999px; pointer-events: none; max-width: calc(100% - 20px); }
@@ -79,25 +87,25 @@ canvas:active { cursor: grabbing; }
 .btn-ghost { background: transparent; color: var(--fg); border-color: var(--line); }
 .btn-ghost:hover:not(:disabled) { border-color: var(--accent); }
 .btn[aria-pressed="true"] { background: var(--panel-2); border-color: var(--accent); }
-.btn-sm { min-height: 40px; padding: 0 14px; font-size: 14px; }
+.btn-sm { min-height: 38px; padding: 0 10px; font-size: 13px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .fine { margin: 12px 0 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
 
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .lbl { font: 500 12px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.name { font: 700 20px/1.1 var(--font-display); }
+.name { font: 700 17px/1.1 var(--font-display); }
 .status { font: 500 13px var(--font-mono); color: var(--muted); }
-.fees { font: 700 52px/1 var(--font-display); color: var(--gold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fees { font: 700 34px/1 var(--font-display); color: var(--gold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .unit { font: 500 13px var(--font-mono); color: var(--muted); }
-.pool { font: 700 34px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.pool { font: 700 26px/1 var(--font-display); font-variant-numeric: tabular-nums; }
 .bar { height: 10px; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
 .bar i { display: block; height: 100%; width: 100%; background: var(--ember); transition: width 0.4s ease; }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .stats div { min-width: 0; }
 .stats dt { font: 500 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.stats dd { margin: 2px 0 0; font: 700 22px/1.1 var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stats dd { margin: 2px 0 0; font: 700 16px/1.1 var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .miners { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -150,7 +158,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       <p class="fine">Connecting shares your public address only. This page never asks you to sign or approve anything.</p>
     </section>
 
-    <aside class="side" aria-label="Mine dashboard">
+    <aside class="side left" aria-label="Miner and rewards">
       <div class="card">
         <div class="row">
           <span class="name" id="botName">No miner yet</span>
@@ -193,6 +201,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         </div>
       </div>
 
+    </aside>
+
+    <aside class="side right" aria-label="Camera and miners">
       <div class="card">
         <span class="lbl">Camera</span>
         <div class="controls">
@@ -221,12 +232,15 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         <div class="unit">Simulated miners stand in for other wallets. Real multi-wallet play needs a game server, which this demo does not have.</div>
       </div>
 
-      <div class="card">
-        <span class="lbl">Activity</span>
-        <ul class="log" id="log"><li class="empty">Nothing yet. Enter the mine to start digging.</li></ul>
-      </div>
     </aside>
   </div>
+
+  <section class="activity" aria-label="Activity">
+    <div class="card">
+        <span class="lbl">Activity</span>
+        <ul class="log" id="log"><li class="empty">Nothing yet. Enter the mine to start digging.</li></ul>
+    </div>
+  </section>
 
   <footer id="foot">
     The pool, fees and miners here are simulated game points stored in this browser. Nothing is paid out, and no token is sent or received. A game demo for <span data-ticker></span>.
