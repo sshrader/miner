@@ -116,6 +116,12 @@ canvas:active { cursor: grabbing; }
 .miners .ma { font: 500 14px var(--font-mono); color: var(--gold); font-variant-numeric: tabular-nums; }
 .miners li.empty { color: var(--muted); }
 
+.tag { position: absolute; z-index: 2; transform: translate(-50%, -100%); font: 500 11px var(--font-mono); color: #E9E5F2; background: rgba(8, 7, 12, 0.78); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; white-space: nowrap; cursor: pointer; appearance: none; }
+.tag.me { color: var(--gold); }
+.tag.sim { border-style: dashed; }
+.tag.sel { background: rgba(163, 148, 255, 0.28); }
+.miners li.sel .mn { color: var(--accent); font-weight: 600; }
+.miners li { cursor: pointer; }
 .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-height: 120px; }
 .log li { display: flex; gap: 10px; font-size: 14px; align-items: baseline; }
 .log .t { font: 400 12px var(--font-mono); color: var(--muted); flex: none; }
@@ -143,7 +149,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       <div class="view" id="view">
         <canvas id="world" tabindex="0" aria-label="3D view of a four-level coal mine with miners digging into the walls and down through the floor. Drag to rotate, shift-drag or right-drag to pan, scroll or pinch to zoom. Arrow keys rotate, plus and minus zoom."></canvas>
         <div class="lvl" id="lvlTag">Level 1 of 4</div>
-        <div class="hint">Drag to rotate &middot; Shift-drag or two fingers to pan &middot; Scroll or pinch to zoom</div>
+        <div class="hint">Click a name tag to follow &middot; Drag to rotate &middot; Shift-drag or two fingers to pan &middot; Scroll or pinch to zoom</div>
         <div class="gate" id="gate">
           <div class="gate-card">
             <h2>Enter the mine</h2>
@@ -208,9 +214,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         <span class="lbl">Camera</span>
         <div class="controls">
           <button class="btn btn-ghost btn-sm" id="followBtn" type="button" aria-pressed="true">Follow miner</button>
+          <button class="btn btn-ghost btn-sm" id="nextBtn" type="button">Next miner</button>
           <button class="btn btn-ghost btn-sm" id="chaseBtn" type="button" aria-pressed="false">Chase view</button>
           <button class="btn btn-ghost btn-sm" id="viewBtn" type="button">Reset view</button>
         </div>
+        <div class="unit" id="followWho">No miner yet</div>
         <span class="lbl">View level</span>
         <div class="controls" id="lvlBtns">
           <button class="btn btn-ghost btn-sm" type="button" data-lv="auto" aria-pressed="true">Auto</button>
@@ -748,7 +756,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   });
 
   /* ---------- state ---------- */
-  var session = null, player = null, bots = [], speedMult = 1, t = 0, regenT = 0;
+  var session = null, player = null, followBot = null, bots = [], speedMult = 1, t = 0, regenT = 0;
   var stats = { fees: 0, blocks: 0, rewards: 0, best: 0 };
   var shown = 0, lastStatus = '', viewLevel = -1, focus = 0, lastFocus = -1;
 
@@ -808,6 +816,10 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     } else {
       bots.forEach(function (b) {
         var li = document.createElement('li');
+        li.tabIndex = 0; li.setAttribute('role', 'button');
+        if (b === (followBot || player)) li.className = 'sel';
+        li.addEventListener('click', function () { pick(b); });
+        li.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(b); } });
         var sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = 'hsl(' + b.hue + ',65%,58%)';
         var nm = document.createElement('span'); nm.className = 'mn'; nm.textContent = b.label;
         var lv = document.createElement('span'); lv.className = 'ml'; lv.textContent = 'L' + (b.level + 1);
@@ -815,6 +827,10 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         li.appendChild(sw); li.appendChild(nm); li.appendChild(lv); li.appendChild(am); ul.appendChild(li);
       });
     }
+    var fbn = followBot || player;
+    $('followWho').textContent = fbn ? 'Following ' + (fbn === player ? 'you' : fbn.name) + ' \u00B7 ' + shortAddr(fbn.addr) : 'No miner yet';
+    $('nextBtn').disabled = bots.length < 2;
+    bots.forEach(function (b) { b.tag.classList.toggle('sel', b === fbn); });
     $('addSim').disabled = !session || bots.length >= SLOTS;
     $('clearSims').disabled = !session || bots.length < 2;
   }
@@ -826,7 +842,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
 
   // Levels above the focus level are cut away so you can see down into the one you are watching.
   function applyFocus() {
-    focus = viewLevel >= 0 ? viewLevel : (player ? player.level : 0);
+    focus = viewLevel >= 0 ? viewLevel : ((followBot || player) ? (followBot || player).level : 0);
     if (focus === lastFocus) return;
     lastFocus = focus;
     for (var l = 0; l < LV; l++) {
@@ -839,12 +855,32 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
 
   /* ---------- miners ---------- */
-  function createBot(slot, kind, label, name, hue) {
+  function fakeAddr() {
+    var A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz', o = '';
+    for (var i = 0; i < 44; i++) o += A[(Math.random() * A.length) | 0];
+    return o;
+  }
+  function pick(b) {
+    followBot = b; cam.follow = true; syncCamBtns(); renderMiners();
+  }
+  function nextMiner() {
+    if (bots.length < 2) return;
+    var cur = bots.indexOf(followBot || player);
+    pick(bots[(cur + 1) % bots.length]);
+  }
+  function createBot(slot, kind, label, name, hue, addr) {
     var rig = rigs[slot];
     rig.cloth.color.setHSL(hue / 360, 0.6, 0.5);
     var b = { id: slot, kind: kind, label: label, name: name, hue: hue, rig: rig, g: spawnCells[slot], level: 0,
       pos: new THREE.Vector3(), path: [], target: -1, state: 'spawn', t: 0, hit: 0, swing: 0, yaw: 0, earned: 0, walk: 0, moving: false, dig: false, next: 'think' };
     b.pos.set(wxg(b.g), 6, wzg(b.g));
+    b.addr = addr || label;
+    var tg = document.createElement('button');
+    tg.type = 'button'; tg.className = 'tag' + (kind === 'you' ? ' me' : ' sim'); tg.textContent = shortAddr(b.addr);
+    tg.title = kind === 'you' ? 'Your miner' : 'Simulated miner (made-up address)';
+    tg.style.borderColor = 'hsl(' + hue + ',65%,58%)';
+    tg.addEventListener('click', function () { pick(b); });
+    view.appendChild(tg); b.tag = tg;
     bots.push(b);
     return b;
   }
@@ -852,9 +888,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function removeBot(b) {
     releaseClaim(b);
     b.rig.g.visible = false; b.rig.light.intensity = 0;
+    if (b.tag && b.tag.parentNode) b.tag.parentNode.removeChild(b.tag);
+    if (followBot === b) followBot = player;
     bots.splice(bots.indexOf(b), 1);
   }
-  function removeAllBots() { while (bots.length) removeBot(bots[0]); player = null; marker.visible = false; }
+  function removeAllBots() { while (bots.length) removeBot(bots[0]); player = null; followBot = null; marker.visible = false; }
   function resetBots() {
     bots.forEach(function (b) {
       b.g = spawnCells[b.id]; b.level = 0; b.path = []; b.target = -1; b.hit = 0; b.t = 0; b.dig = false;
@@ -883,7 +921,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     regenT = 0;
     newWorld();
     var label = kind === 'wallet' ? shortAddr(id) : 'Demo mode';
-    player = createBot(0, 'you', 'You (' + (kind === 'wallet' ? label : 'demo') + ')', 'You', session.hue);
+    player = createBot(0, 'you', 'You (' + (kind === 'wallet' ? label : 'demo') + ')', 'You', session.hue, id);
+    followBot = player;
     cam.follow = true; syncCamBtns();
     cam.tx = wxg(player.g); cam.tz = wzg(player.g); cam.ty = 0.8; clampPan();
     $('walletAddr').textContent = label;
@@ -915,7 +954,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     bots.forEach(function (b) { used[b.id] = true; });
     for (k = 1; k < SLOTS; k++) if (!used[k]) { slot = k; break; }
     if (slot < 0) return;
-    createBot(slot, 'sim', SIM_NAMES[slot - 1] + ' (sim)', SIM_NAMES[slot - 1], SIM_HUES[slot - 1]);
+    createBot(slot, 'sim', SIM_NAMES[slot - 1] + ' (sim)', SIM_NAMES[slot - 1], SIM_HUES[slot - 1], fakeAddr());
     log(SIM_NAMES[slot - 1] + ' entered the mine (simulated).', 'sim');
     renderMiners();
   }
@@ -1119,15 +1158,15 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
 
   // Near walls on the camera's side are lowered so the miner is never hidden behind rock.
   function updateLowering(dt) {
-    var want = {}, g, key, k;
-    if (player && player.level === focus && player.state !== 'spawn') {
-      var px = gx(player.g), pz = gz(player.g), sn = Math.sin(cam.theta), cs = Math.cos(cam.theta);
+    var want = {}, g, key, k, lb = followBot || player;
+    if (lb && lb.level === focus && lb.state !== 'spawn') {
+      var px = gx(lb.g), pz = gz(lb.g), sn = Math.sin(cam.theta), cs = Math.cos(cam.theta);
       for (var dz = -3; dz <= 3; dz++) for (var dx = -3; dx <= 3; dx++) {
         if (dx * dx + dz * dz > 10 || dx * sn + dz * cs < -0.3) continue;
         var nx = px + dx, nz = pz + dz;
         if (nx < 0 || nz < 0 || nx >= X || nz >= Z) continue;
-        g = player.level * N + nz * X + nx;
-        if (grid[g] !== 0 && g !== player.target) want[g] = true;
+        g = lb.level * N + nz * X + nx;
+        if (grid[g] !== 0 && g !== lb.target) want[g] = true;
       }
     }
     for (key in want) lowered[key] = true;
@@ -1262,17 +1301,25 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     if (player) {
       marker.visible = player.level >= focus; marker.position.set(player.pos.x, player.pos.y + 0.03, player.pos.z);
       var pulse = 1 + 0.08 * Math.sin(t * 5); marker.scale.set(pulse, pulse, pulse);
-      var kf = Math.min(1, dt * 3);
-      if (cam.follow) { cam.tx += (player.pos.x - cam.tx) * kf; cam.tz += (player.pos.z - cam.tz) * kf; clampPan(); }
-      cam.ty += (player.pos.y + 0.8 - cam.ty) * kf;
+      var kf = Math.min(1, dt * 3), fb = followBot || player;
+      if (cam.follow) { cam.tx += (fb.pos.x - cam.tx) * kf; cam.tz += (fb.pos.z - cam.tz) * kf; clampPan(); }
+      cam.ty += (fb.pos.y + 0.8 - cam.ty) * kf;
       if (cam.chase) {
-        var diff = Math.atan2(Math.sin(player.yaw + Math.PI - cam.theta), Math.cos(player.yaw + Math.PI - cam.theta));
+        var diff = Math.atan2(Math.sin(fb.yaw + Math.PI - cam.theta), Math.cos(fb.yaw + Math.PI - cam.theta));
         cam.theta += diff * Math.min(1, dt * 2.2);
       }
     } else {
       cam.ty += (baseY(focus) + 0.8 - cam.ty) * Math.min(1, dt * 3);
     }
     placeCamera();
+    camera.updateMatrixWorld();
+    for (var ti = 0; ti < bots.length; ti++) {
+      var tb = bots[ti];
+      vPos.set(tb.pos.x, tb.pos.y + 1.45, tb.pos.z).project(camera);
+      var show = tb.level >= focus && vPos.z < 1;
+      tb.tag.hidden = !show;
+      if (show) { tb.tag.style.left = ((vPos.x * 0.5 + 0.5) * view.clientWidth) + 'px'; tb.tag.style.top = ((-vPos.y * 0.5 + 0.5) * view.clientHeight) + 'px'; }
+    }
     renderer.render(scene, camera);
     if (Math.abs(shown - stats.fees) > 0.5) {
       shown += (stats.fees - shown) * Math.min(1, dt * 6);
@@ -1301,6 +1348,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   $('speed1').addEventListener('click', function () { setSpeed(1); });
   $('speed3').addEventListener('click', function () { setSpeed(3); });
   $('followBtn').addEventListener('click', function () { cam.follow = !cam.follow; syncCamBtns(); });
+  $('nextBtn').addEventListener('click', nextMiner);
   $('chaseBtn').addEventListener('click', function () { cam.chase = !cam.chase; if (cam.chase) cam.follow = true; syncCamBtns(); });
   $('viewBtn').addEventListener('click', function () {
     cam.theta = DEF.theta; cam.phi = DEF.phi; cam.r = DEF.r; cam.follow = true; cam.chase = false; syncCamBtns();
