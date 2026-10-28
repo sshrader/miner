@@ -46,6 +46,14 @@ h1 { margin: 0; font: 700 30px/1 var(--font-display); letter-spacing: 0.01em; te
 
 .chip { display: inline-flex; align-items: center; gap: 8px; font: 500 13px var(--font-mono); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); min-height: 32px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.wallet { position: relative; }
+button.chip { color: var(--fg); cursor: pointer; }
+button.chip:hover { border-color: var(--accent); }
+.chip .caret { font-size: 11px; opacity: 0.7; }
+.wmenu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 190px; display: flex; flex-direction: column; padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); }
+.wmenu[hidden] { display: none; }
+.wmenu button { text-align: left; background: transparent; color: var(--fg); border: 0; border-radius: 7px; padding: 10px 12px; min-height: 40px; font: 500 14px var(--font-body, system-ui, sans-serif); cursor: pointer; }
+.wmenu button:hover, .wmenu button:focus-visible { background: rgba(255,255,255,0.08); }
 .chip.on .dot { background: var(--good); }
 
 .stage { display: grid; grid-template-columns: 264px minmax(0, 1fr) 264px; gap: 16px; align-items: start; }
@@ -157,7 +165,14 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         <p class="sub">Hold <span data-ticker></span>, send a miner underground, and watch it dig deeper.</p>
       </div>
     </div>
-    <div class="chip" id="walletChip"><span class="dot"></span><span id="walletAddr">Not connected</span></div>
+    <div class="wallet">
+      <button class="chip" id="walletChip" type="button" aria-haspopup="menu" aria-expanded="false"><span class="dot"></span><span id="walletAddr">Not connected</span><span class="caret" id="walletCaret" hidden aria-hidden="true">&#9662;</span></button>
+      <div class="wmenu" id="walletMenu" role="menu" hidden>
+        <button type="button" role="menuitem" id="wmCopy">Copy address</button>
+        <button type="button" role="menuitem" id="wmChange">Change wallet</button>
+        <button type="button" role="menuitem" id="wmDisc">Disconnect</button>
+      </div>
+    </div>
   </header>
 
   <div class="stage">
@@ -1029,7 +1044,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       cam.tx = wxg(player.g); cam.tz = wzg(player.g); cam.ty = 0.8; clampPan();
     }
     $('walletAddr').textContent = label;
-    $('walletChip').className = 'chip on';
+    $('walletChip').className = 'chip on'; $('walletCaret').hidden = false;
     $('botName').textContent = kind === 'wallet' ? 'Miner ' + id.slice(-4) : 'Miner DEMO';
     $('gate').hidden = true;
     $('leaveBtn').hidden = false;
@@ -1048,7 +1063,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       if (lsid) api('/api/leave', { sessionId: lsid }).catch(function () {});
     } else removeAllBots();
     $('walletAddr').textContent = 'Not connected';
-    $('walletChip').className = 'chip';
+    $('walletChip').className = 'chip'; $('walletCaret').hidden = true; closeWalletMenu();
     $('botName').textContent = 'No miner yet';
     $('gate').hidden = false;
     $('leaveBtn').hidden = true;
@@ -1343,7 +1358,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     var p = getProvider();
     if (!p) return;
     if (p.on) {
-      p.on('disconnect', function () { if (session && session.kind === 'wallet') endSession(); });
+      p.on('disconnect', function () { if (session && session.kind === 'wallet' && !p.isConnected) endSession(); });
       p.on('accountChanged', function (pk) { if (pk) begin(pk.toString()); else if (session && session.kind === 'wallet') endSession(); });
     }
     try {
@@ -1653,6 +1668,41 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     }
     requestAnimationFrame(frame);
   }
+
+  /* ---------- wallet menu: copy address, change wallet, disconnect ---------- */
+  function closeWalletMenu() { $('walletMenu').hidden = true; $('walletChip').setAttribute('aria-expanded', 'false'); }
+  function disconnectWallet() {
+    var wasWallet = session && session.kind === 'wallet';
+    var p = getProvider();
+    if (wasWallet && p && p.disconnect) { try { p.disconnect(); } catch (e) { /* ignore */ } }
+    if (session) endSession();
+  }
+  $('walletChip').addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    if (!session) { if ($('connectBtn').hidden) return; connectWallet(); return; }
+    var m = $('walletMenu'); m.hidden = !m.hidden;
+    $('walletChip').setAttribute('aria-expanded', String(!m.hidden));
+    $('wmCopy').hidden = session.kind !== 'wallet';
+    $('wmChange').textContent = session.kind === 'wallet' ? 'Change wallet' : 'Use a wallet instead';
+    $('wmDisc').textContent = session.kind === 'wallet' ? 'Disconnect' : 'Leave demo';
+  });
+  document.addEventListener('click', closeWalletMenu);
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeWalletMenu(); });
+  $('wmCopy').addEventListener('click', function () {
+    var a = session && session.id, b = $('wmCopy');
+    closeWalletMenu();
+    if (!a) return;
+    function done(ok) { log(ok ? 'Wallet address copied.' : 'Could not copy. Your address is ' + a, 'sim'); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(a).then(function () { done(true); }, function () { done(false); });
+    else done(false);
+  });
+  $('wmDisc').addEventListener('click', function () { closeWalletMenu(); disconnectWallet(); });
+  $('wmChange').addEventListener('click', function () {
+    closeWalletMenu();
+    disconnectWallet();
+    // Phantom asks which account to connect again, so this is how you switch wallets.
+    setTimeout(connectWallet, 250);
+  });
 
   /* ---------- events ---------- */
   $('connectBtn').addEventListener('click', connectWallet);
