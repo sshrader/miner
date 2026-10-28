@@ -74,3 +74,14 @@ Miners cannot dig through a level's floor until **every reward hidden on that le
 ## Elevator
 
 A new miner rides a mine elevator down from above the world (about 4.5 seconds) through an opening in the roof of level 1 before it starts digging. Timing and height are `ELEV_TIME` and `ELEV` in `world.js` and `index.html`.
+
+## Season end and sweeping leftovers
+
+Set `SEASON_END` (for example `2026-12-31T23:59:00Z`) and the mine freezes at that moment: no more digging, no more rewards paid. Then stop the server and send what is left to a wallet you own:
+
+```
+node sweep.js --to <your address>            # asks you to type "yes"
+node sweep.js --to <your address> --keep 0.05 --yes
+```
+
+`sweep.js` refuses to run while the game server is up, checks that the RPC is devnet, and subtracts the network fee. Tell players your leftover policy before launch.

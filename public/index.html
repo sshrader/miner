@@ -1192,6 +1192,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
   var STATE_WORD = { spawn: 'Descending', think: 'Thinking', wait: 'Waiting', move: 'Walking', mine: 'Digging', descend: 'Dropping down', celebrate: 'Found something', idle: 'Opening a new mine' };
   function netTick(m) {
+    if (m.pool.over && !netTick.over) { netTick.over = true; log('The season has ended. The mine is closed and no more rewards will be paid.', 'sim'); setStatus('Season ended'); }
     var key = m.pool.left + ':' + m.pool.rewards + ':' + m.pool.unlocked;
     if (key !== lastPoolKey) {
       lastPoolKey = key; gate = { open: m.pool.unlocked, lv: m.pool.lv }; poolLeft = m.pool.left; rewardsLeft = m.pool.rewards;

@@ -33,6 +33,11 @@ const PRE = PRESETS[DIFFICULTY];
 const PER_LEVEL = Math.max(1, Math.min(30, Number(process.env.REWARDS_PER_LEVEL) || PRE.perLevel));
 const MAX_REWARDS = PER_LEVEL * 8;
 const HARD_MULT = Math.max(1, Math.min(10, Number(process.env.HARD_MULT) || PRE.hardMult));
+// Optional season end (e.g. SEASON_END=2026-12-31T23:59:00Z). After it the mine freezes and no more rewards are paid,
+// so the leftover balance can be swept safely with: node sweep.js --to <address>
+const SEASON_END = process.env.SEASON_END ? Date.parse(process.env.SEASON_END) : 0;
+if (process.env.SEASON_END && !SEASON_END) { console.error('SEASON_END must be a date such as 2026-12-31T23:59:00Z'); process.exit(1); }
+const seasonOver = () => SEASON_END > 0 && Date.now() >= SEASON_END;
 const MIN_REWARD = 1000000;               // 0.001 SOL; also clears the rent minimum for a brand-new recipient account
 const RESERVE = 2000000 + MAX_REWARDS * 5000; // keep rent minimum + fees in the reward wallet
 const WALLET_FILE = path.join(__dirname, 'reward-wallet.json');
@@ -137,6 +142,8 @@ async function state() {
     miners: world.miners.size,
     maxMiners: SLOTS,
     difficulty: DIFFICULTY,
+    seasonEnd: SEASON_END || null,
+    seasonOver: seasonOver(),
     unlocked: unlockedLv + 1,
     levelsLeft: levelCounts(),
     explorer
@@ -198,7 +205,7 @@ function dropSession(sid) {
   console.log('Miner ' + sess.minerId + ' left: ' + sess.address);
 }
 function tickMsg(ev) {
-  return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: unlockedLv + 1, lv: levelCounts() } };
+  return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: unlockedLv + 1, lv: levelCounts(), over: seasonOver() } };
 }
 function broadcast(obj) {
   const line = 'data: ' + JSON.stringify(obj) + '\n\n';
@@ -346,7 +353,7 @@ const server = http.createServer(async (req, res) => {
   setInterval(() => {
     const now = Date.now(), dt = Math.min(0.2, (now - lastT) / 1000);
     lastT = now;
-    world.tick(dt);
+    if (!seasonOver()) world.tick(dt);
     if (++n % 2 === 0 && clients.size) {
       if (world.takeWorldDirty()) broadcast(world.worldMsg());
       broadcast(tickMsg(world.flush()));

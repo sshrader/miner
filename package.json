@@ -6,8 +6,13 @@
   "scripts": {
     "start": "node server.js",
     "dry": "node server.js --dry-run",
-    "airdrop": "node airdrop.js"
+    "airdrop": "node airdrop.js",
+    "sweep": "node sweep.js"
   },
-  "engines": { "node": ">=18" },
-  "dependencies": { "@solana/web3.js": "^1.98.0" }
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0"
+  }
 }
