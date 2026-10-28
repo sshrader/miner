@@ -70,3 +70,7 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 ## Level gating
 
 Miners cannot dig through a level's floor until **every reward hidden on that level has been found**. Level 1 opens first; finding its last reward unlocks level 2, and so on. Rewards only hide in walls (never floors), spread evenly over the 8 levels, with bigger shares deeper down. Simulated one-miner times to clear the whole mine: easy about 2 h, normal about 2 h, hard about 3 h, brutal about 4 h (more miners finish faster). Change `DIFFICULTY`, `REWARDS_PER_LEVEL` or `HARD_MULT` to tune it.
+
+## Elevator
+
+A new miner rides a mine elevator down from above the world (about 4.5 seconds) through an opening in the roof of level 1 before it starts digging. Timing and height are `ELEV_TIME` and `ELEV` in `world.js` and `index.html`.

@@ -297,6 +297,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
 
   // The mine: LV stacked levels, each X by Z cells. Wall cells are tall rock pillars (height PH) standing on a floor slab (thickness FT).
   // Digging a floor slab opens a shaft down to the next level.
+  var ELEV = 16, ELEV_TIME = 4.5;
   var X = 48, Z = 34, N = X * Z, LV = 8, NN = LV * N, PH = 2.0, FT = 1.0, LH = PH + FT;
   var HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
   // The pool is split into this many hidden reward blocks across all levels. Amounts are in cents.
@@ -591,10 +592,46 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       for (var i = 0; i < N; i++) {
         var g = l * N + i;
         if (grid[g] === VOID) continue;
+        if (l === 0 && spawnCells.indexOf(g) >= 0) continue;   // the elevator shafts open through the roof here
         vPos.set(wxg(g), baseY(l) + PH - 0.02, wzg(g)); vScale.set(1, 1, 1);
         mtx.compose(vPos, qId, vScale); ceilings[l].setMatrixAt(n++, mtx);
       }
       ceilings[l].count = n; ceilings[l].instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  // Elevator: a wooden collar around each shaft opening in the roof, and a cage on a cable that carries a new miner down.
+  var collarG = new THREE.Group(); scene.add(collarG);
+  var woodM = new THREE.MeshLambertMaterial({ color: 0x5a3d22 }), ironM = new THREE.MeshLambertMaterial({ color: 0x3a3f4a }), lampM = new THREE.MeshBasicMaterial({ color: 0xffd27a });
+  function bx(w, h, d, m, x, y, z) { var o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); return o; }
+  function buildCollars() {
+    while (collarG.children.length) collarG.remove(collarG.children[0]);
+    for (var i = 0; i < spawnCells.length; i++) {
+      var g = spawnCells[i], x = wxg(g), z = wzg(g), y = PH + 0.08;
+      collarG.add(bx(1.5, 0.16, 0.16, woodM, x, y, z - 0.67), bx(1.5, 0.16, 0.16, woodM, x, y, z + 0.67), bx(0.16, 0.16, 1.5, woodM, x - 0.67, y, z), bx(0.16, 0.16, 1.5, woodM, x + 0.67, y, z));
+      collarG.add(bx(0.12, 0.9, 0.12, ironM, x - 0.67, y + 0.45, z - 0.67), bx(0.12, 0.9, 0.12, ironM, x + 0.67, y + 0.45, z - 0.67), bx(0.12, 0.9, 0.12, ironM, x - 0.67, y + 0.45, z + 0.67), bx(0.12, 0.9, 0.12, ironM, x + 0.67, y + 0.45, z + 0.67));
+    }
+    collarG.visible = true;
+  }
+  var cages = [];
+  for (var ck = 0; ck < 16; ck++) {
+    var cg = new THREE.Group();
+    cg.add(bx(0.95, 0.08, 0.95, woodM, 0, 0.04, 0));
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (c) { cg.add(bx(0.05, 2.0, 0.05, ironM, c[0] * 0.45, 1.0, c[1] * 0.45)); });
+    cg.add(bx(0.95, 0.06, 0.95, ironM, 0, 2.0, 0), bx(0.03, 40, 0.03, ironM, 0, 22, 0), bx(0.14, 0.1, 0.14, lampM, 0, 1.9, 0));
+    cg.visible = false; scene.add(cg); cages.push(cg);
+  }
+  function updateCages() {
+    for (var i = 0; i < cages.length; i++) cages[i].visible = false;
+    for (var j = 0; j < bots.length; j++) {
+      var b = bots[j];
+      if (b.state === 'spawn') {
+        var cgj = cages[b.id]; if (!cgj) continue;
+        cgj.position.set(b.pos.x, b.pos.y, b.pos.z); cgj.visible = true; b.rode = true;
+      } else if (b.rode) {
+        b.rode = false;
+        emit(b.pos.x, 0.1, b.pos.z, PAL.floor, 14, 2.4, 0.12, 0.8);
+      }
     }
   }
 
@@ -641,7 +678,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     for (i = 0; picks.length < SLOTS; i++) picks.push(cand[i % cand.length]);
     spawnCells = picks;
     placeDecor();
-    buildCeilings();
+    buildCeilings(); buildCollars();
     updatePool();
     lastFocus = -1;
   }
@@ -910,7 +947,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     for (var l = 0; l < LV; l++) {
       var vis = l >= focus;
       pillars[l].forEach(function (m) { if (m) m.visible = vis; });
-      floors[l].visible = vis; supportsG[l].visible = vis; ceilings[l].visible = vis; stalac[l].visible = vis;
+      floors[l].visible = vis; supportsG[l].visible = vis; ceilings[l].visible = vis; stalac[l].visible = vis; collarG.visible = focus === 0;
     }
     lanterns.forEach(function (ln) { ln.g.visible = ln.on && ln.level >= focus; });
     $('lvlTag').textContent = 'Level ' + (focus + 1) + ' of ' + LV;
@@ -935,7 +972,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     rig.cloth.color.setHSL(hue / 360, 0.6, 0.5);
     var b = { id: slot, kind: kind, label: label, name: name, hue: hue, rig: rig, g: spawnCells[slot], level: 0,
       pos: new THREE.Vector3(), path: [], target: -1, state: 'spawn', t: 0, hit: 0, swing: 0, yaw: 0, earned: 0, walk: 0, moving: false, dig: false, next: 'think' };
-    b.pos.set(wxg(b.g), 6, wzg(b.g));
+    b.pos.set(wxg(b.g), ELEV, wzg(b.g));
     b.addr = addr || label;
     var tg = document.createElement('button');
     tg.type = 'button'; tg.className = 'tag' + (kind === 'you' ? ' me' : (kind === 'sim' ? ' sim' : '')); tg.textContent = shortAddr(b.addr);
@@ -960,7 +997,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function resetBots() {
     bots.forEach(function (b) {
       b.g = spawnCells[b.id]; b.level = 0; b.path = []; b.target = -1; b.hit = 0; b.t = 0; b.dig = false;
-      b.pos.set(wxg(b.g), 6, wzg(b.g));
+      b.pos.set(wxg(b.g), ELEV, wzg(b.g));
       b.state = 'spawn';
     });
     renderMiners();
@@ -1109,6 +1146,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     spawnCells = w.spawn;
     placeDecor();
     buildCeilings();
+    buildCollars();
     lastFocus = -1;
   }
   function connectStream() {
@@ -1213,7 +1251,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       b.yaw = s.yaw; b.level = s.lv; b.dig = !!s.d; b.state = s.s; b.moving = s.s === 'move';
       if (b.moving) b.walk += dt;
       if (b.state === 'mine') { b.hit += dt; b.swing = Math.min(1, (b.hit % HIT_TIME) / HIT_TIME); } else { b.hit = 0; b.swing = 0; }
-      b.t = b.state === 'spawn' ? Math.min(1, (6 - b.pos.y) / 6) : 1;
+      b.t = b.state === 'spawn' ? Math.min(1, (ELEV - b.pos.y) / ELEV) : 1;
       if (b === player) setStatus('L' + (b.level + 1) + ' \u00B7 ' + (b.state === 'mine' && b.dig ? 'Digging down' : STATE_WORD[b.state] || ''));
     }
   }
@@ -1362,9 +1400,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function updateBot(b, sdt) {
     switch (b.state) {
       case 'spawn':
-        b.t += sdt / 1.2;
-        var k = Math.min(1, b.t), e = 1 - Math.pow(1 - k, 3);
-        b.pos.y = 6 * (1 - e);
+        b.t += sdt / ELEV_TIME;
+        var k = Math.min(1, b.t), e = k * k * (3 - 2 * k);
+        b.pos.y = ELEV * (1 - e);
         if (k >= 1) {
           b.pos.y = 0; b.state = 'think';
           emit(b.pos.x, 0.1, b.pos.z, PAL.floor, 14, 2.4, 0.12, 0.8);
@@ -1570,6 +1608,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     update(dt);
     updateLowering(dt);
     for (var i = 0; i < bots.length; i++) syncBot(bots[i], dt);
+    updateCages();
     var lamp = bots.filter(function (q) { return q.level >= focus; });
     lamp.sort(function (p, q) {
       return (Math.pow(p.pos.x - cam.tx, 2) + Math.pow(p.pos.y - cam.ty, 2) + Math.pow(p.pos.z - cam.tz, 2)) - (Math.pow(q.pos.x - cam.tx, 2) + Math.pow(q.pos.y - cam.ty, 2) + Math.pow(q.pos.z - cam.tz, 2));

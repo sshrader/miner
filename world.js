@@ -4,6 +4,7 @@
 
 const X = 48, Z = 34, N = X * Z, LV = 8, NN = LV * N, PH = 2, FT = 1, LH = PH + FT;
 const VOID = 6;                                // solid nothing outside a level's outline: not drawn, not diggable
+const ELEV = 16, ELEV_TIME = 4.5;   // elevator start height and ride time in seconds
 const HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
 const SLOTS = Math.max(1, Math.min(16, Number(process.env.MAX_MINERS) || 12));   // most miners in the mine at once
 const HARD = [0, 3, 4, 2, 0, 999];                 // hits to break: 1 rock, 2 deep rock, 3 coal, 5 edge rock
@@ -149,7 +150,7 @@ function createWorld(hooks, opts) {
 
   function resetMiner(m) {
     m.g = spawn[m.id]; m.level = 0; m.path = []; m.target = -1; m.hit = 0; m.t = 0; m.dig = false; m.moving = false;
-    m.pos = { x: wx(m.g), y: 6, z: wz(m.g) };
+    m.pos = { x: wx(m.g), y: ELEV, z: wz(m.g) };
     m.state = 'spawn';
   }
 
@@ -274,9 +275,9 @@ function createWorld(hooks, opts) {
   function updateMiner(m, dt) {
     switch (m.state) {
       case 'spawn': {
-        m.t += dt / 1.2;
-        const k = Math.min(1, m.t), e = 1 - Math.pow(1 - k, 3);
-        m.pos.y = 6 * (1 - e);
+        m.t += dt / ELEV_TIME;   // the mine elevator lowers the miner from above the world down to level 1
+        const k = Math.min(1, m.t), e = k * k * (3 - 2 * k);
+        m.pos.y = ELEV * (1 - e);
         if (k >= 1) { m.pos.y = 0; m.state = 'think'; }
         break;
       }
