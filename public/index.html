@@ -102,6 +102,10 @@ canvas:active { cursor: grabbing; }
 .gate-card p { margin: 0; color: var(--muted); font-size: 15px; }
 .gate-card .msg { color: var(--fg); background: var(--panel-2); border-radius: 6px; padding: 8px 10px; font-size: 14px; }
 .pasteform { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.queuebox { display: flex; flex-direction: column; gap: 10px; }
+.queuebox[hidden] { display: none; }
+.queuebox p { color: var(--fg); background: var(--panel-2); border-radius: 6px; padding: 10px; font-size: 14px; line-height: 1.4; }
+.miners { max-height: 34vh; overflow-y: auto; }
 .pasteform[hidden] { display: none; }
 .pasteform label { color: var(--muted); font-size: 13px; }
 .pasteform input { min-height: 40px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); font: 500 13px var(--font-mono); }
@@ -200,6 +204,10 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
             <h2>Enter the mine</h2>
             <p id="gateTxt">Connect your Phantom wallet and a miner lowers into the cave to start digging.</p>
             <button class="btn btn-primary" id="connectBtn" type="button">Connect Phantom</button>
+            <div class="queuebox" id="queueBox" hidden>
+              <p id="queueTxt"></p>
+              <button class="btn btn-ghost" id="queueLeave" type="button">Leave the line</button>
+            </div>
             <form class="pasteform" id="pasteForm" hidden>
               <label for="pasteAddr">Or paste a wallet address. Nothing to connect or sign.</label>
               <input id="pasteAddr" autocomplete="off" spellcheck="false" placeholder="Your Solana address" maxlength="44">
@@ -645,7 +653,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     collarG.visible = true;
   }
   var cages = [];
-  for (var ck = 0; ck < 16; ck++) {
+  for (var ck = 0; ck < 50; ck++) {
     var cg = new THREE.Group();
     cg.add(bx(0.95, 0.08, 0.95, woodM, 0, 0.04, 0));
     [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (c) { cg.add(bx(0.05, 2.0, 0.05, ironM, c[0] * 0.45, 1.0, c[1] * 0.45)); });
@@ -745,7 +753,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     return { g: g, body: body, legL: legL, legR: legR, armL: armL, tool: tool, swingG: swingG, cloth: cloth };
   }
   var rigs = [];
-  for (var rk = 0; rk < 16; rk++) rigs.push(makeRig());
+  for (var rk = 0; rk < 50; rk++) rigs.push(makeRig());   // one per slot; unused rigs stay hidden
   // Lights are expensive and their number must stay fixed, so 4 headlamps are lent to the miners nearest the camera.
   var headLights = [];
   for (var hl = 0; hl < 4; hl++) { var hlL = new THREE.PointLight(0xfff0c8, 0, 8); scene.add(hlL); headLights.push(hlL); }
@@ -1107,7 +1115,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Admin key comes from the private link (#admin=...). Only the server's check decides who is admin; hiding the button is cosmetic.
   var adminKey = '';
   try {
-    var hm = /admin=([A-Za-z0-9_-]+)/.exec(location.hash);
+    var hm = /admin=([0-9a-fA-F]+)/.exec(location.hash);
     if (hm) { adminKey = hm[1]; sessionStorage.setItem('bbAdmin', adminKey); history.replaceState(null, '', location.pathname + location.search); }
     else adminKey = sessionStorage.getItem('bbAdmin') || '';
   } catch (e) { /* storage blocked: admin link then works until reload */ }
@@ -1129,6 +1137,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       (s.needsFunding ? (isTok() ? 'Send ' + unitSym() + ' and a little devnet SOL (for fees) to this address; the pool builds itself once it arrives.' : 'Send devnet SOL to this address (faucet.solana.com); the pool builds itself once it arrives.') : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + '.' + (s.holdRequired ? ' Mining requires holding at least ' + fmt(s.minHold) + '.' : '');
     applyAssetLabels();
     if (s.needsFunding && !session) showMsg('The reward pool is not funded yet. Check back soon.', false);
+    if (s.maxMiners) $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to ' + s.maxMiners + ' miners at once' + (s.queueLength ? ', ' + s.queueLength + ' waiting in line.' : '.') + (s.shiftMinutes ? ' Shifts last ' + s.shiftMinutes + ' minutes when others are waiting.' : '');
     updatePool();
   }
   function applyAssetLabels() {
@@ -1174,16 +1183,58 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     step.then(function (signature) {
       return api('/api/session', { address: addr, signature: signature });
     }).then(function (r) {
-      DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = !!r.verified;
-      $('verifyBtn').textContent = r.verified ? 'Verified \u2713' : 'Verify my wallet';
-      startSession(addr, 'wallet');
-      if (session) session.pasted = !!pasted;
-      $('verifyBtn').disabled = !!pasted || !!DEV.verified;
+      if (r.queued) { enterQueue(addr, r, pasted); return; }
+      joined(addr, r, pasted);
     }).catch(function (e) {
       setStatus('Idle');
       showMsg(e && e.code === 4001 ? 'The signature request was declined, so no miner was sent in.' : (e && e.message) || 'Could not start a devnet session.', false);
     });
   }
+  function joined(addr, r, pasted) {
+    DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = !!r.verified;
+    $('verifyBtn').textContent = r.verified ? 'Verified \u2713' : 'Verify my wallet';
+    startSession(addr, 'wallet');
+    if (session) session.pasted = !!pasted;
+    $('verifyBtn').disabled = !!pasted || !!DEV.verified;
+  }
+  // The mine is full: wait in line. Holding more of the token and waiting longer both move you up.
+  var qTicket = null, qTimer = null;
+  function gateReset() {
+    if (qTimer) { clearInterval(qTimer); qTimer = null; }
+    qTicket = null;
+    $('queueBox').hidden = true;
+    $('connectBtn').hidden = false;
+    $('pasteForm').hidden = !!(DEV && DEV.requireSig);
+    setStatus('Idle');
+  }
+  function queueText(r) {
+    var t = 'The mine is full (' + (DEV ? DEV.maxMiners : '') + ' miners). You are #' + r.position + ' of ' + r.size + ' in line. You will be let in automatically.';
+    if (DEV && isTok()) t += ' Holding more ' + unitSym() + ' moves you up; every doubling of your holding is worth about ' + (DEV.queueAgeMinutes || 10) + ' minutes of waiting.';
+    return t;
+  }
+  function enterQueue(addr, r, pasted) {
+    qTicket = r.ticket;
+    $('connectBtn').hidden = true; $('pasteForm').hidden = true; $('msg').hidden = true;
+    $('queueBox').hidden = false; $('queueTxt').textContent = queueText(r);
+    setStatus('Waiting in line');
+    if (qTimer) clearInterval(qTimer);
+    qTimer = setInterval(function () {
+      var tk = qTicket;
+      if (!tk) return;
+      api('/api/queue', { ticket: tk }).then(function (q) {
+        if (qTicket !== tk) return;
+        if (q.promoted) { clearInterval(qTimer); qTimer = null; qTicket = null; $('queueBox').hidden = true; $('connectBtn').hidden = false; $('pasteForm').hidden = !!DEV.requireSig; joined(addr, q, pasted); }
+        else if (q.failed) { gateReset(); showMsg(q.failed, false); }
+        else $('queueTxt').textContent = queueText(q);
+      }).catch(function () { if (qTicket === tk) { gateReset(); showMsg('You were taken out of the line. Join again when you are ready.', false); } });
+    }, 3000);
+  }
+  $('queueLeave').addEventListener('click', function () {
+    var tk = qTicket;
+    gateReset();
+    if (tk) api('/api/leave', { ticket: tk }).catch(function () {});
+  });
+
   /* ---------- shared live world (devnet mode) ---------- */
   // The server runs the mine and every miner. This page loads its world, then applies each change it streams.
   function unb64(str, arr) { var bin = atob(str); for (var i = 0; i < arr.length; i++) arr[i] = bin.charCodeAt(i); }
@@ -1812,8 +1863,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     try { navigator.clipboard.writeText(a).then(function () { done('Copied'); }, function () { done('Select it manually'); }); } catch (e) { done('Select it manually'); }
   });
   window.addEventListener('pagehide', function () {
-    if (DEV && DEV.sessionId && navigator.sendBeacon) {
-      try { navigator.sendBeacon('/api/leave', new Blob([JSON.stringify({ sessionId: DEV.sessionId })], { type: 'application/json' })); } catch (e) { /* ignore */ }
+    if (DEV && (DEV.sessionId || qTicket) && navigator.sendBeacon) {
+      try { navigator.sendBeacon('/api/leave', new Blob([JSON.stringify({ sessionId: DEV.sessionId, ticket: qTicket })], { type: 'application/json' })); } catch (e) { /* ignore */ }
     }
   });
   window.addEventListener('pagehide', save);

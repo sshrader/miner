@@ -13,6 +13,12 @@ const HOST = process.env.HOST || '127.0.0.1';               // use 0.0.0.0 on a 
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';        // set to 1 only when a trusted proxy (Railway) sits in front
 const MAX_PER_IP = Math.max(0, Number(process.env.MAX_PER_IP) || 0);   // miners allowed per connection address; 0 = no limit
 const IP_SWITCH_MS = Math.max(0, Number(process.env.IP_SWITCH_MINUTES === undefined ? 10 : process.env.IP_SWITCH_MINUTES)) * 60000;   // with MAX_PER_IP: how long a connection is tied to the last address it mined with
+// Waiting queue: when the mine is full, people wait in line and are let in as places free up.
+//   QUEUE_AGE_MINUTES  minutes in line that are worth as much as doubling your holding (default 10)
+//   SHIFT_MINUTES      longest a miner stays while others wait (0 = no limit)
+const QUEUE_AGE_MS = Math.max(0, Number(process.env.QUEUE_AGE_MINUTES === undefined ? 10 : process.env.QUEUE_AGE_MINUTES)) * 60000;
+const SHIFT_MS = Math.max(0, Number(process.env.SHIFT_MINUTES) || 0) * 60000;
+const MAX_QUEUE = 500;
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 const POOL_SOL = parseFloat(process.env.POOL_SOL || '0.5');
@@ -259,6 +265,9 @@ async function state() {
     needsFunding: pool.total === 0,
     miners: world.miners.size,
     maxMiners: SLOTS,
+    queueLength: queue.size,
+    queueAgeMinutes: QUEUE_AGE_MS / 60000,
+    shiftMinutes: SHIFT_MS / 60000,
     difficulty: DIFFICULTY,
     seasonEnd: SEASON_END || null,
     seasonOver: seasonOver(),
@@ -359,6 +368,7 @@ function dropSession(sid) {
   sessions.delete(sid);
   world.removeMiner(sess.minerId);
   console.log('Miner ' + sess.minerId + ' left: ' + sess.address);
+  setImmediate(() => { promote().catch(() => {}); });   // a place just opened: let the next person in line in
 }
 function tickMsg(ev) {
   return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: unlockedLv + 1, lv: levelCounts(), over: seasonOver() } };
@@ -413,6 +423,49 @@ function ipOf(req) {
   return ip;
 }
 const challenges = new Map();   // address -> { message, at }; each is single use and expires after 2 minutes
+const queue = new Map();          // ticket -> { address, ip, hold, proven, since, last }
+const queueResults = new Map();  // ticket -> { result, at }, so a client that missed the answer can ask again
+// Higher holdings and longer waits move you up: every doubling of your holding (above the minimum) is worth QUEUE_AGE_MINUTES in line.
+function queueScore(e, now) {
+  const base = MIN_HOLD > 0 ? MIN_HOLD : UI();
+  const holdPts = TOKEN_MODE && e.hold ? Math.log2(e.hold / base + 1) : 0;
+  const waitPts = QUEUE_AGE_MS > 0 ? (now - e.since) / QUEUE_AGE_MS : 0;
+  return holdPts + waitPts;
+}
+function queueOrder() {
+  const now = Date.now();
+  return Array.from(queue.entries()).sort((a, b) => queueScore(b[1], now) - queueScore(a[1], now) || a[1].since - b[1].since);
+}
+function admitSession(e) {
+  const miner = world.addMiner(e.address, hashStr(e.address) % 360);
+  if (!miner) return null;
+  const id = crypto.randomBytes(12).toString('hex');
+  sessions.set(id, { address: e.address, minerId: miner.id, last: Date.now(), ip: e.ip, hold: e.hold, holdAt: Date.now(), verified: e.proven, joinedAt: Date.now() });
+  console.log('Miner ' + miner.id + ' joined: ' + e.address);
+  return { sessionId: id, minerId: miner.id, verified: e.proven };
+}
+let promoting = false;
+async function promote() {
+  if (promoting) return;
+  promoting = true;
+  try {
+    while (queue.size && world.miners.size < SLOTS) {
+      const [ticket, e] = queueOrder()[0];
+      queue.delete(ticket);
+      if (HOLD_REQUIRED) {
+        const bal = await holderBalance(e.address);
+        if (bal == null || bal < MIN_HOLD) { queueResults.set(ticket, { at: Date.now(), result: { failed: 'Your ' + TOKEN_SYMBOL + ' balance is now below the minimum, so you were taken out of the line.' } }); continue; }
+        e.hold = bal;
+      }
+      let dup = false;
+      for (const s2 of sessions.values()) if (s2.address === e.address) dup = true;
+      if (dup) { queueResults.set(ticket, { at: Date.now(), result: { failed: 'That address is already mining.' } }); continue; }
+      const r = admitSession(e);
+      if (!r) { queue.set(ticket, e); break; }
+      queueResults.set(ticket, { at: Date.now(), result: r });
+    }
+  } finally { promoting = false; }
+}
 const joinLog = new Map();   // ip -> recent join times, to slow down hammering
 const server = http.createServer(async (req, res) => {
   try {
@@ -450,6 +503,7 @@ const server = http.createServer(async (req, res) => {
       if (MAX_PER_IP > 0) {
         let n = 0;
         for (const s2 of sessions.values()) if (s2.ip === ip && s2.address !== addr) n++;
+        for (const q2 of queue.values()) if (q2.ip === ip && q2.address !== addr) n++;
         if (n >= MAX_PER_IP) return send(res, 429, { error: 'Only ' + MAX_PER_IP + (MAX_PER_IP === 1 ? ' miner is' : ' miners are') + ' allowed per connection. Disconnect your other wallet first.' });
       }
       if (MAX_PER_IP > 0 && IP_SWITCH_MS > 0) {
@@ -480,12 +534,33 @@ const server = http.createServer(async (req, res) => {
         if (!proven && s2.ip !== ip) return send(res, 409, { error: 'That address is already mining. If it is yours on another device, connect your wallet and sign to take over.' });
         dropSession(sid);
       }
-      const miner = world.addMiner(addr, hashStr(addr) % 360);
-      if (!miner) return send(res, 409, { error: 'The mine is full (' + SLOTS + ' miners). Try again in a bit.' });
-      const id = crypto.randomBytes(12).toString('hex');
-      sessions.set(id, { address: addr, minerId: miner.id, last: Date.now(), ip, hold, holdAt: Date.now(), verified: proven });
-      console.log('Miner ' + miner.id + ' joined: ' + addr);
-      return send(res, 200, { sessionId: id, minerId: miner.id, verified: proven });
+      for (const [tk, q2] of queue) {
+        if (q2.address !== addr) continue;
+        if (!proven && q2.ip !== ip) return send(res, 409, { error: 'That address is already waiting in line. If it is yours on another device, connect your wallet and sign to take over.' });
+        queue.delete(tk);
+      }
+      const entry = { address: addr, ip, hold, proven, since: Date.now(), last: Date.now() };
+      if (world.miners.size < SLOTS && queue.size === 0) {
+        const r = admitSession(entry);
+        if (r) return send(res, 200, r);
+      }
+      if (queue.size >= MAX_QUEUE) return send(res, 503, { error: 'The mine and the waiting line are both full. Try again later.' });
+      const ticket = crypto.randomBytes(12).toString('hex');
+      queue.set(ticket, entry);
+      promote();
+      const order = queueOrder().map((x) => x[0]);
+      console.log('Queued: ' + addr + ' (#' + (order.indexOf(ticket) + 1) + ')');
+      return send(res, 200, { queued: true, ticket, position: order.indexOf(ticket) + 1, size: queue.size });
+    }
+    if (url.pathname === '/api/queue' && req.method === 'POST') {
+      const body = await readBody(req), ticket = String(body.ticket);
+      const done = queueResults.get(ticket);
+      if (done) return send(res, 200, done.result.failed ? { failed: done.result.failed } : { promoted: true, ...done.result });
+      const e = queue.get(ticket);
+      if (!e) return send(res, 404, { error: 'Unknown ticket' });
+      e.last = Date.now();
+      const order = queueOrder().map((x) => x[0]);
+      return send(res, 200, { queued: true, position: order.indexOf(ticket) + 1, size: queue.size });
     }
     if (url.pathname === '/api/ping' && req.method === 'POST') {
       const body = await readBody(req);
@@ -496,7 +571,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/leave' && req.method === 'POST') {
       const body = await readBody(req);
-      dropSession(String(body.sessionId));
+      if (body.ticket) queue.delete(String(body.ticket));
+      if (body.sessionId) dropSession(String(body.sessionId));
       return send(res, 200, { ok: true });
     }
     if (url.pathname === '/api/chat' && req.method === 'GET') {
@@ -599,6 +675,14 @@ const server = http.createServer(async (req, res) => {
   setInterval(() => {
     const now = Date.now();
     for (const [sid, sess] of sessions) if (now - sess.last > 20000) dropSession(sid);
+    for (const [tk, e] of queue) if (now - e.last > 20000) queue.delete(tk);
+    for (const [tk, r] of queueResults) if (now - r.at > 60000) queueResults.delete(tk);
+    if (SHIFT_MS > 0 && queue.size > 0 && world.miners.size >= SLOTS) {   // full and people are waiting: rotate out whoever has mined longest
+      const oldest = Array.from(sessions.entries()).filter(([, s2]) => now - s2.joinedAt > SHIFT_MS).sort((a, b) => a[1].joinedAt - b[1].joinedAt);
+      const need = Math.min(queue.size, oldest.length);
+      for (let i = 0; i < need; i++) kick(oldest[i][0], 'Removed from the mine: your shift is over and others are waiting. Join the line to come back.');
+    }
+    promote();
     for (const c of clients) { try { c.write(': keepalive\n\n'); } catch (e) { clients.delete(c); } }
   }, 5000);
   // Holders are re-checked every minute; a wallet that dropped below the minimum is removed from the mine.

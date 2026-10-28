@@ -108,7 +108,7 @@ Variables to set on Railway (devnet only for now):
 | `TRUST_PROXY` | `1` |
 | `MAX_PER_IP` | `1` |
 | `ALLOWED_ORIGINS` | your public address, e.g. `https://your-app.up.railway.app` |
-| `ADMIN_KEY` | a long random string of letters and numbers (your admin link is that address plus `/#admin=<key>`) |
+| `ADMIN_KEY` | a long random hex string (your admin link is that address plus `/#admin=<key>`) |
 | `REWARD_WALLET_JSON` | the throwaway devnet keypair as a JSON array (Railway has no persistent disk for `reward-wallet.json`) |
 | `DIFFICULTY`, `SEASON_END`, `POOL_SOL` | as you like |
 
@@ -144,6 +144,15 @@ Dry-run testing without a network: `DRY_RUN=1 DRY_TOKEN=1 MIN_HOLD=100 node serv
 
 Sweep leftover tokens when the season is over: `$env:TOKEN_MINT="<mint>"; node sweep.js --to <address> --token`, then `node sweep.js --to <address>` for the SOL.
 
-## Deploy notes
+## More miners, the waiting line, and shifts
 
-If a host builds with an old Node and crashes on start with `ERR_REQUIRE_ESM` (from `rpc-websockets` / `uuid`), the project now asks for Node 22 (`engines`, `.nvmrc`) and pins that package to a compatible version via `overrides`. On Railway you can also set the variable `NIXPACKS_NODE_VERSION=22`.
+`MAX_MINERS` now goes up to **50** (default 12). Everyone watching sees the same live mine; only the miners dig.
+
+When the mine is full, new people join a **waiting line** and are let in automatically as places free up (they ride the elevator down). The page shows "You are #3 of 8 in line". Order in line:
+- In token mode, **holding more moves you up**: every doubling of your holding (above `MIN_HOLD`) is worth `QUEUE_AGE_MINUTES` minutes of waiting (default 10). Waiting also moves you up on its own, so a smaller holder is never stuck forever.
+- Without a token it is first come, first served.
+- Leaving the line or the mine puts you at the back (your waiting time starts again). When your turn comes the balance is checked once more.
+
+`SHIFT_MINUTES=30` (default `0` = off) limits how long a miner can stay while others are waiting: the longest-serving miner is rotated out and the next in line takes the place. A removed miner can join the line again.
+
+More miners finds rewards much faster. Simulated time for the miners together to clear level 1: 12 miners about 1 to 4 minutes (easy to brutal), 50 miners about 1 to 2 minutes. Raise `HARD_MULT` (up to 10) and `REWARDS_PER_LEVEL` (up to 30) for bigger crowds, or use `SEASON_END`, and keep an eye on how fast the pool drains.

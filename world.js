@@ -6,7 +6,7 @@ const X = 48, Z = 34, N = X * Z, LV = 8, NN = LV * N, PH = 2, FT = 1, LH = PH + 
 const VOID = 6;                                // solid nothing outside a level's outline: not drawn, not diggable
 const ELEV = 16, ELEV_TIME = 4.5;   // elevator start height and ride time in seconds
 const HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
-const SLOTS = Math.max(1, Math.min(16, Number(process.env.MAX_MINERS) || 12));   // most miners in the mine at once
+const SLOTS = Math.max(1, Math.min(50, Number(process.env.MAX_MINERS) || 12));   // most miners in the mine at once
 const HARD = [0, 3, 4, 2, 0, 999];                 // hits to break: 1 rock, 2 deep rock, 3 coal, 5 edge rock
 const NAMES = ['', 'rock', 'deep rock', 'coal', '', 'edge rock'];
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -137,12 +137,16 @@ function createWorld(hooks, opts) {
       }
     }
     const cand = shuffle(openByLevel[0].slice()), picks = [];
-    for (let i = 0; i < cand.length && picks.length < SLOTS; i++) {
-      let ok = true;
-      for (let j = 0; j < picks.length; j++) {
-        if (Math.abs(picks[j] % X - cand[i] % X) + Math.abs(((picks[j] / X) | 0) - ((cand[i] / X) | 0)) < 3) { ok = false; break; }
+    // Elevator shafts: as far apart as there is room for (3 cells, then 2, then 1), so even 50 miners get their own.
+    for (const gap of [3, 2, 1]) {
+      for (let i = 0; i < cand.length && picks.length < SLOTS; i++) {
+        if (picks.indexOf(cand[i]) >= 0) continue;
+        let ok = true;
+        for (let j = 0; j < picks.length; j++) {
+          if (Math.abs(picks[j] % X - cand[i] % X) + Math.abs(((picks[j] / X) | 0) - ((cand[i] / X) | 0)) < gap) { ok = false; break; }
+        }
+        if (ok) picks.push(cand[i]);
       }
-      if (ok) picks.push(cand[i]);
     }
     for (let i = 0; picks.length < SLOTS; i++) picks.push(cand[i % cand.length]);
     spawn = picks;
