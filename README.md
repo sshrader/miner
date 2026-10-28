@@ -25,11 +25,20 @@ npm start
 4. In Phantom: Settings > Developer Settings > Testnet Mode > Solana Devnet, so you can see the SOL arrive.
 5. Press **Connect Phantom**. Your miner drops in, and every reward shows up with a link to the transaction on Solana Explorer (devnet).
 
+## One shared world
+
+The server runs the cave and every miner (`world.js`) and streams the state to every browser, so everyone sees the same mine, the same miners and the same blocks breaking at the same place and time.
+
+- Opening the page without connecting lets you watch the live mine. Connecting a wallet adds your miner (up to 4 at once, one per wallet).
+- The server decides which digs pay, so the pool is shared: whichever miner breaks the winning block gets that reward.
+- Miners are removed a few seconds after their tab closes, or when you press Leave.
+- Open a second browser profile with another Phantom wallet to watch two miners in the same cave.
+
 ## Chat and wallet check
 
 - Everyone connected to the same server shares one chat (last 100 messages, 140 characters each). The chat window sits inside the mine view (bottom right, with a button to collapse it), and a message also pops up above that miner's head.
 - **Verify my wallet** asks Phantom to sign a short text message. The server checks the signature, and your chat messages then get a green check, which proves you own that address. It is a message, not a transaction, and it is free.
-- Chat is local to your server. Other people can only join if you make the server reachable to them, which this project does not set up. The miners themselves are not shared between browsers yet.
+- Chat is local to your server. Other people can only join if you make the server reachable to them, which this project does not set up.
 
 ## Try it without any network
 
@@ -51,4 +60,4 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 
 - Never put real funds in `reward-wallet.json`. It is an unencrypted key file.
 - Restarting the server builds a fresh pool from the current balance.
-- The miner can be sped up (3x) and rewards are only paid for digs the server counts, with a 100 ms minimum gap.
+- Rewards are only paid for digs the server itself counts, so the browser cannot ask for one.

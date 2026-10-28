@@ -21,7 +21,6 @@ const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 const MAX_REWARDS = 60;
 const MIN_REWARD = 1000000;               // 0.001 SOL; also clears the rent minimum for a brand-new recipient account
 const RESERVE = 2000000 + MAX_REWARDS * 5000; // keep rent minimum + fees in the reward wallet
-const MIN_DIG_GAP_MS = 100;
 const WALLET_FILE = path.join(__dirname, 'reward-wallet.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -110,6 +109,7 @@ async function state() {
     poolLeft: pool.left,
     rewardsLeft: pool.rewards.size + pool.retry.length,
     needsFunding: pool.total === 0,
+    miners: world.miners.size,
     explorer
   };
 }
@@ -121,6 +121,46 @@ async function pay(address, lamports) {
 }
 
 const sessions = new Map();
+const clients = new Set();
+const { createWorld, SLOTS } = require('./world');
+function hashStr(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+
+// Called by the shared mine for every block or floor a miner breaks. The server alone decides which digs pay.
+function onDig(m) {
+  pool.digs++;
+  let amt = 0;
+  if (pool.retry.length) amt = pool.retry.shift();
+  else if (pool.rewards.has(pool.digs)) { amt = pool.rewards.get(pool.digs); pool.rewards.delete(pool.digs); }
+  if (!amt) return 0;
+  pool.left -= amt;   // reserved right away so two miners can never be paid the same reward
+  pay(m.addr, amt).then((sig) => {
+    balanceCache.at = 0;
+    world.emit({ e: 'paid', by: m.id, amt, sig });
+    console.log(`Paid ${(amt / LAMPORTS_PER_SOL).toFixed(4)} SOL to ${m.addr} ${sig}`);
+  }).catch((err) => {
+    pool.left += amt; pool.retry.push(amt);
+    const msg = 'Payout failed, will retry on a later dig: ' + String((err && err.message) || err).slice(0, 140);
+    world.emit({ e: 'perr', by: m.id, msg });
+    console.error(msg);
+  });
+  return amt;
+}
+const world = createWorld({ onDig });
+
+function dropSession(sid) {
+  const sess = sessions.get(sid);
+  if (!sess) return;
+  sessions.delete(sid);
+  world.removeMiner(sess.minerId);
+  console.log('Miner ' + sess.minerId + ' left: ' + sess.address);
+}
+function tickMsg(ev) {
+  return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.rewards.size + pool.retry.length } };
+}
+function broadcast(obj) {
+  const line = 'data: ' + JSON.stringify(obj) + '\n\n';
+  for (const c of clients) { try { c.write(line); } catch (e) { clients.delete(c); } }
+}
 
 // Chat: kept in memory, last 100 messages. Everyone connected to this server sees the same chat.
 const chat = [];
@@ -141,30 +181,6 @@ function verifySig(address, message, sigB64) {
   return crypto.verify(null, Buffer.from(message, 'utf8'), key, Buffer.from(sigB64, 'base64'));
 }
 function checkAddr(a) { if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) throw new Error('bad'); return a; }
-
-async function handleDig(sess) {
-  pool.digs++;
-  let amt = 0;
-  if (pool.retry.length) amt = pool.retry.shift();
-  else if (pool.rewards.has(pool.digs)) { amt = pool.rewards.get(pool.digs); pool.rewards.delete(pool.digs); }
-  const out = { reward: 0, signature: null, error: null };
-  if (amt) {
-    try {
-      out.signature = await pay(sess.address, amt);
-      out.reward = amt;
-      pool.left -= amt;
-      balanceCache.at = 0;
-      console.log(`Paid ${(amt / LAMPORTS_PER_SOL).toFixed(4)} SOL to ${sess.address} ${out.signature}`);
-    } catch (e) {
-      pool.retry.push(amt);
-      out.error = 'Payout failed, will retry on a later dig: ' + String((e && e.message) || e).slice(0, 140);
-      console.error(out.error);
-    }
-  }
-  out.poolLeft = pool.left;
-  out.rewardsLeft = pool.rewards.size + pool.retry.length;
-  return out;
-}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -188,24 +204,40 @@ const server = http.createServer(async (req, res) => {
       const origin = req.headers.origin;
       if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}`) return send(res, 403, { error: 'Bad origin' });
     }
+    if (url.pathname === '/api/events' && req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+      res.write('retry: 2000\n\n');
+      res.write('data: ' + JSON.stringify(world.worldMsg()) + '\n\n');
+      res.write('data: ' + JSON.stringify(tickMsg([])) + '\n\n');
+      clients.add(res);
+      req.on('close', () => clients.delete(res));
+      return;
+    }
     if (url.pathname === '/api/state' && req.method === 'GET') return send(res, 200, await state());
     if (url.pathname === '/api/session' && req.method === 'POST') {
       const body = await readBody(req);
       let addr;
       try { addr = DRY_RUN ? checkAddr(String(body.address)) : new PublicKey(String(body.address)).toBase58(); } catch (e) { return send(res, 400, { error: 'Invalid wallet address' }); }
+      // One miner per wallet: a new session for the same address replaces the old one.
+      for (const [sid, s2] of sessions) if (s2.address === addr) dropSession(sid);
+      const miner = world.addMiner(addr, hashStr(addr) % 360);
+      if (!miner) return send(res, 409, { error: 'The mine is full (' + SLOTS + ' miners). Try again in a bit.' });
       const id = crypto.randomBytes(12).toString('hex');
-      sessions.set(id, { address: addr, last: 0 });
-      console.log('Session started for ' + addr);
-      return send(res, 200, { sessionId: id });
+      sessions.set(id, { address: addr, minerId: miner.id, last: Date.now() });
+      console.log('Miner ' + miner.id + ' joined: ' + addr);
+      return send(res, 200, { sessionId: id, minerId: miner.id });
     }
-    if (url.pathname === '/api/dig' && req.method === 'POST') {
+    if (url.pathname === '/api/ping' && req.method === 'POST') {
       const body = await readBody(req);
       const sess = sessions.get(String(body.sessionId));
       if (!sess) return send(res, 404, { error: 'Unknown session' });
-      const now = Date.now();
-      if (now - sess.last < MIN_DIG_GAP_MS) return send(res, 429, { error: 'Too fast' });
-      sess.last = now;
-      return send(res, 200, await handleDig(sess));
+      sess.last = Date.now();
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/leave' && req.method === 'POST') {
+      const body = await readBody(req);
+      dropSession(String(body.sessionId));
+      return send(res, 200, { ok: true });
     }
     if (url.pathname === '/api/chat' && req.method === 'GET') {
       const since = Number(url.searchParams.get('since')) || 0;
@@ -267,6 +299,21 @@ const server = http.createServer(async (req, res) => {
     }
   }
   await buildPool();
+  let lastT = Date.now(), n = 0;
+  setInterval(() => {
+    const now = Date.now(), dt = Math.min(0.2, (now - lastT) / 1000);
+    lastT = now;
+    world.tick(dt);
+    if (++n % 2 === 0 && clients.size) {
+      if (world.takeWorldDirty()) broadcast(world.worldMsg());
+      broadcast(tickMsg(world.flush()));
+    } else if (!clients.size) world.flush();
+  }, 50);
+  setInterval(() => {
+    const now = Date.now();
+    for (const [sid, sess] of sessions) if (now - sess.last > 20000) dropSession(sid);
+    for (const c of clients) { try { c.write(': keepalive\n\n'); } catch (e) { clients.delete(c); } }
+  }, 5000);
   server.listen(PORT, '127.0.0.1', () => {
     console.log('');
     console.log('Bedrock Bots (devnet) running at http://127.0.0.1:' + PORT);

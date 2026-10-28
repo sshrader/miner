@@ -262,7 +262,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <button class="btn btn-ghost btn-sm" id="addSim" type="button" disabled>Add simulated miner</button>
           <button class="btn btn-ghost btn-sm" id="clearSims" type="button" disabled>Remove simulated</button>
         </div>
-        <div class="unit">Simulated miners stand in for other wallets. Real multi-wallet play needs a game server, which this demo does not have.</div>
+        <div class="unit" id="minersNote">Simulated miners stand in for other wallets. Real multi-wallet play needs a game server, which this demo does not have.</div>
       </div>
 
     </aside>
@@ -288,6 +288,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Change this to your ticker. It appears in the header and footer.
   var TICKER = '$BEDROCK';
   var DEV = null;   // set when this page is served by server.js (devnet mode)
+  var netBots = {}, evtSrc = null, lastPoolKey = '';
 
   // The mine: LV stacked levels, each X by Z cells. Wall cells are tall rock pillars (height PH) standing on a floor slab (thickness FT).
   // Digging a floor slab opens a shaft down to the next level.
@@ -902,8 +903,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     b.pos.set(wxg(b.g), 6, wzg(b.g));
     b.addr = addr || label;
     var tg = document.createElement('button');
-    tg.type = 'button'; tg.className = 'tag' + (kind === 'you' ? ' me' : ' sim'); tg.textContent = shortAddr(b.addr);
-    tg.title = kind === 'you' ? 'Your miner' : 'Simulated miner (made-up address)';
+    tg.type = 'button'; tg.className = 'tag' + (kind === 'you' ? ' me' : (kind === 'sim' ? ' sim' : '')); tg.textContent = shortAddr(b.addr);
+    tg.title = kind === 'you' ? 'Your miner' : (kind === 'sim' ? 'Simulated miner (made-up address)' : 'Another wallet\'s miner');
     tg.style.borderColor = 'hsl(' + hue + ',65%,58%)';
     tg.addEventListener('click', function () { pick(b); });
     view.appendChild(tg); b.tag = tg;
@@ -940,19 +941,21 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   /* ---------- session ---------- */
   function startSession(id, kind) {
     if (session) save();
-    removeAllBots();
+    if (!DEV) removeAllBots();
     session = { id: id, kind: kind, hue: hashStr(id) % 360 };
     load();
     shown = stats.fees;
     $('fees').textContent = fmt(shown);
     updateStats();
     regenT = 0;
-    newWorld();
     var label = kind === 'wallet' ? shortAddr(id) : 'Demo mode';
-    player = createBot(0, 'you', 'You (' + (kind === 'wallet' ? label : 'demo') + ')', 'You', session.hue, id);
-    followBot = player;
-    cam.follow = true; syncCamBtns();
-    cam.tx = wxg(player.g); cam.tz = wzg(player.g); cam.ty = 0.8; clampPan();
+    if (!DEV) {
+      newWorld();
+      player = createBot(0, 'you', 'You (' + (kind === 'wallet' ? label : 'demo') + ')', 'You', session.hue, id);
+      followBot = player;
+      cam.follow = true; syncCamBtns();
+      cam.tx = wxg(player.g); cam.tz = wzg(player.g); cam.ty = 0.8; clampPan();
+    }
     $('walletAddr').textContent = label;
     $('walletChip').className = 'chip on';
     $('botName').textContent = kind === 'wallet' ? 'Miner ' + id.slice(-4) : 'Miner DEMO';
@@ -961,19 +964,24 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('msg').hidden = true; $('installLink').hidden = true;
     log(kind === 'wallet' ? 'Miner lowered in for ' + label + '.' : 'Demo miner lowered in. No wallet connected.');
     setStatus('L1 · Descending');
+    if (DEV) adoptPlayer();
     renderMiners();
   }
   function endSession() {
     save();
-    session = null; removeAllBots(); regenT = 0;
-    if (DEV) DEV.sessionId = null;
+    session = null; regenT = 0;
+    if (DEV) {
+      var lsid = DEV.sessionId;
+      DEV.sessionId = null; DEV.myId = -1; player = null; followBot = null; marker.visible = false;
+      if (lsid) api('/api/leave', { sessionId: lsid }).catch(function () {});
+    } else removeAllBots();
     $('walletAddr').textContent = 'Not connected';
     $('walletChip').className = 'chip';
     $('botName').textContent = 'No miner yet';
     $('gate').hidden = false;
     $('leaveBtn').hidden = true;
     setStatus('Idle');
-    newWorld();
+    if (!DEV) newWorld();
     renderMiners();
   }
   function addSim() {
@@ -1015,7 +1023,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     adopt(s);
     rew.fill(0); frew.fill(0);
     $('demoBtn').hidden = true;
-    $('gateTxt').textContent = 'Devnet test. Connect Phantom and your miner digs for devnet SOL paid by a local server.';
+    $('gateTxt').textContent = 'You are watching the live mine. Connect Phantom to send your own miner in. Every wallet shares this one cave.';
+    $('speed1').hidden = true; $('speed3').hidden = true; $('addSim').hidden = true; $('clearSims').hidden = true;
+    $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to 4 miners at once.';
+    connectStream();
+    setInterval(pingSession, 5000);
     $('poolLbl').textContent = 'Reward pool (devnet SOL)';
     $('shareLbl').textContent = 'Your share (devnet SOL)';
     $('foot').textContent = 'Devnet test build. Rewards are devnet SOL, which has no real value, paid from a throwaway wallet by a server on this computer. This page only reads your public address.';
@@ -1028,24 +1040,138 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function begin(addr) {
     if (!DEV) { startSession(addr, 'wallet'); return; }
     api('/api/session', { address: addr }).then(function (r) {
-      DEV.sessionId = r.sessionId; DEV.verified = false;
+      DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = false;
       $('verifyBtn').textContent = 'Verify my wallet';
       startSession(addr, 'wallet');
     }).catch(function (e) { showMsg('Could not start a devnet session: ' + e.message, false); });
   }
-  function devDig(b, x, y, z, what) {
+  /* ---------- shared live world (devnet mode) ---------- */
+  // The server runs the mine and every miner. This page loads its world, then applies each change it streams.
+  function unb64(str, arr) { var bin = atob(str); for (var i = 0; i < arr.length; i++) arr[i] = bin.charCodeAt(i); }
+  function loadWorld(w) {
+    unb64(w.grid, grid); unb64(w.dmg, dmg); unb64(w.fgrid, fgrid); unb64(w.fdmg, fdmg);
+    claim.fill(0); ys.fill(1); lowered = {}; rew.fill(0); frew.fill(0);
+    var l, i, g;
+    for (l = 0; l < LV; l++) {
+      var counts = [0, 0, 0, 0, 0, 0];
+      openByLevel[l] = [];
+      for (i = 0; i < N; i++) {
+        g = l * N + i; btype[g] = grid[g];
+        if (grid[g]) inst[g] = counts[grid[g]]++; else openByLevel[l].push(i);
+      }
+      [1, 2, 3, 5].forEach(function (tt) { pillars[l][tt].count = counts[tt]; });
+    }
+    for (g = 0; g < NN; g++) {
+      if (btype[g]) { setBlock(g, 1, 1); shadeBlock(g); }
+      setFloor(g, fgrid[g] === 0 ? 0 : 1); shadeFloor(g);
+    }
+    spawnCells = w.spawn;
+    placeDecor();
+    lastFocus = -1;
+  }
+  function connectStream() {
+    if (evtSrc) return;
+    evtSrc = new EventSource('/api/events');
+    evtSrc.onmessage = function (e) {
+      var m;
+      try { m = JSON.parse(e.data); } catch (err) { return; }
+      if (m.t === 'world') loadWorld(m); else if (m.t === 'tick') netTick(m);
+    };
+  }
+  function pingSession() {
+    if (!DEV || !DEV.sessionId) return;
     var sid = DEV.sessionId;
-    if (!sid) return;
-    api('/api/dig', { sessionId: sid }).then(function (r) {
-      if (!session || DEV.sessionId !== sid) return;
-      poolLeft = DEV.poolLeft = r.poolLeft; rewardsLeft = DEV.rewardsLeft = r.rewardsLeft;
-      if (r.reward > 0) {
-        collect(b, r.reward, x, y, z, what, true);
-        if (r.signature) log('View payout on devnet', 'win', 'https://explorer.solana.com/tx/' + r.signature + '?cluster=devnet');
-        api('/api/state').then(adopt).catch(function () {});
-      } else updatePool();
-      if (r.error) log(r.error, 'sim');
-    }).catch(function () { /* rate limited or busy: skip this dig */ });
+    api('/api/ping', { sessionId: sid }).catch(function (e) {
+      if (DEV && DEV.sessionId === sid && /Unknown session/.test(e.message)) { log('You were disconnected from the mine. Connect again to rejoin.', 'sim'); endSession(); }
+    });
+  }
+  function adoptPlayer() {
+    if (!DEV || !session || DEV.myId == null) return;
+    var b = netBots[DEV.myId];
+    if (!b || b === player) return;
+    player = b; b.kind = 'you'; b.name = 'You'; b.label = 'You (' + shortAddr(b.addr) + ')';
+    b.tag.className = 'tag me'; b.tag.title = 'Your miner';
+    followBot = b; cam.follow = true; syncCamBtns();
+    cam.tx = b.pos.x; cam.tz = b.pos.z; clampPan();
+    renderMiners();
+  }
+  var STATE_WORD = { spawn: 'Descending', think: 'Thinking', wait: 'Waiting', move: 'Walking', mine: 'Digging', descend: 'Dropping down', celebrate: 'Found something', idle: 'Opening a new mine' };
+  function netTick(m) {
+    var key = m.pool.left + ':' + m.pool.rewards;
+    if (key !== lastPoolKey) {
+      lastPoolKey = key; poolLeft = m.pool.left; rewardsLeft = m.pool.rewards;
+      if (DEV) { DEV.poolLeft = poolLeft; DEV.rewardsLeft = rewardsLeft; }
+      updatePool();
+    }
+    var seen = {}, i, changed = false;
+    for (i = 0; i < m.m.length; i++) {
+      var s = m.m[i], b = netBots[s.id];
+      seen[s.id] = true;
+      if (!b) {
+        b = createBot(s.id, 'peer', shortAddr(s.a), shortAddr(s.a), s.h, s.a);
+        b.mid = s.id; b.first = true; netBots[s.id] = b; changed = true;
+      }
+      b.net = s;
+    }
+    for (var k in netBots) {
+      if (seen[k]) continue;
+      var gone = netBots[k];
+      delete netBots[k];
+      if (gone === player) { player = null; }
+      if (followBot === gone) followBot = null;
+      removeBot(gone); changed = true;
+    }
+    adoptPlayer();
+    if (!followBot && !player && bots.length) followBot = bots[0];
+    if (changed) renderMiners();
+    for (i = 0; i < m.ev.length; i++) netEvent(m.ev[i]);
+  }
+  function netEvent(e) {
+    var b = netBots[e.by], g = e.g, l;
+    if (e.e === 'hit') {
+      if (!btype[g]) return;
+      dmg[g] = e.d; shadeBlock(g);
+      emit(wxg(g), baseY(gl(g)) + 0.9, wzg(g), PAL[btype[g]], 3, 2.2, 0.1, 0.7);
+    } else if (e.e === 'break') {
+      if (!btype[g]) return;
+      var ty = btype[g];
+      grid[g] = 0; dmg[g] = 0; setBlock(g, 0, 1);
+      emit(wxg(g), baseY(gl(g)) + 0.8, wzg(g), PAL[ty], 16, 3.4, 0.15, 0.9);
+      if (b && b === player) { stats.blocks++; updateStats(); if (stats.blocks % 10 === 0) save(); }
+    } else if (e.e === 'fhit') {
+      fdmg[g] = e.d; shadeFloor(g);
+      emit(wxg(g), baseY(gl(g)) + 0.1, wzg(g), PAL.floor, 3, 2.2, 0.1, 0.7);
+    } else if (e.e === 'fbreak') {
+      fgrid[g] = 0; fdmg[g] = 0; setFloor(g, 0);
+      emit(wxg(g), baseY(gl(g)) - 0.3, wzg(g), PAL.floor, 18, 3.0, 0.15, 0.9);
+      if (b && b === player) { stats.blocks++; updateStats(); if (stats.blocks % 10 === 0) save(); }
+    } else if (e.e === 'reward') {
+      if (b) collect(b, e.amt, e.x, e.y, e.z, e.what, true);
+    } else if (e.e === 'paid') {
+      if (b && b === player) log('View payout on devnet', 'win', 'https://explorer.solana.com/tx/' + e.sig + '?cluster=devnet');
+      api('/api/state').then(adopt).catch(function () {});
+    } else if (e.e === 'perr') {
+      if (b && b === player) log(e.msg, 'sim');
+    } else if (e.e === 'join') {
+      if (!player || e.a !== player.addr) log(shortAddr(e.a) + ' entered the mine.', 'sim');
+    } else if (e.e === 'leave') {
+      if (!player || e.a !== player.addr) log(shortAddr(e.a) + ' left the mine.', 'sim');
+    }
+  }
+  // Smooths the server's 10 updates per second into movement, and plays the swing while a miner is digging.
+  function netStep(dt) {
+    var k = 1 - Math.exp(-dt * 14);
+    for (var i = 0; i < bots.length; i++) {
+      var b = bots[i], s = b.net;
+      if (!s) continue;
+      if (b.first) { b.pos.set(s.x, s.y, s.z); b.first = false; }
+      else { b.pos.x += (s.x - b.pos.x) * k; b.pos.y += (s.y - b.pos.y) * k; b.pos.z += (s.z - b.pos.z) * k; }
+      b.yaw = s.yaw; b.level = s.lv; b.dig = !!s.d; b.state = s.s; b.moving = s.s === 'move';
+      if (b.moving) b.walk += dt;
+      if (b.state === 'mine') { b.hit += dt; b.swing = Math.min(1, (b.hit % HIT_TIME) / HIT_TIME); } else { b.hit = 0; b.swing = 0; }
+      b.t = b.state === 'spawn' ? Math.min(1, (6 - b.pos.y) / 6) : 1;
+      if (b === player) setStatus('L' + (b.level + 1) + ' \u00B7 ' + (b.state === 'mine' && b.dig ? 'Digging down' : STATE_WORD[b.state] || ''));
+    }
   }
 
   /* ---------- chat and wallet check (devnet mode) ---------- */
@@ -1285,6 +1411,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       ln.L.intensity = lit ? 1.15 + 0.2 * Math.sin(t * 11 + k * 1.9) + 0.12 * Math.sin(t * 27 + k * 2.3) : 0;
       ln.lamp.scale.y = 0.92 + 0.12 * Math.sin(t * 15 + k);
     }
+    if (DEV) { netStep(dt); return; }
     var sdt = dt * speedMult;
     if (regenT > 0) {
       regenT -= sdt;
@@ -1303,7 +1430,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     if (b === player) {
       stats.fees += amt; stats.rewards++;
       if (amt > stats.best) stats.best = amt;
-      var tier = amt < 20 ? 'Small find' : amt < 60 ? 'Nice find' : 'Jackpot';
+      var tier = DEV ? (amt < 5000000 ? 'Small find' : amt < 12000000 ? 'Nice find' : 'Jackpot') : (amt < 20 ? 'Small find' : amt < 60 ? 'Nice find' : 'Jackpot');
       log(tier + ' in ' + what + ': +' + fmt(amt), 'win');
       setStatus('L' + (b.level + 1) + ' · Found something');
       save();
@@ -1326,7 +1453,6 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     emit(x, y0 + 0.8, z, PAL[type], 16, 3.4, 0.15, 0.9);
     var mine = b === player;
     if (mine) stats.blocks++;
-    if (DEV && mine) devDig(b, x, y0 + 0.9, z, NAMES[type].toLowerCase());
     var amt = rew[g];
     if (amt > 0) {
       rew[g] = 0;
@@ -1351,7 +1477,6 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     setFloor(g, 0);
     emit(x, y0 - 0.3, z, PAL.floor, 18, 3.0, 0.15, 0.9);
     if (b === player) { stats.blocks++; updateStats(); }
-    if (DEV && b === player) devDig(b, x, y0, z, 'the floor');
     if (frew[g] > 0) { var a1 = frew[g]; frew[g] = 0; collect(b, a1, x, y0, z, 'the floor'); found = true; }
     if (grid[lg] !== 0) {
       var lt = grid[lg];
@@ -1395,10 +1520,13 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     update(dt);
     updateLowering(dt);
     for (var i = 0; i < bots.length; i++) syncBot(bots[i], dt);
+    var fb = followBot || player;
     if (player) {
       marker.visible = player.level >= focus; marker.position.set(player.pos.x, player.pos.y + 0.03, player.pos.z);
       var pulse = 1 + 0.08 * Math.sin(t * 5); marker.scale.set(pulse, pulse, pulse);
-      var kf = Math.min(1, dt * 3), fb = followBot || player;
+    } else marker.visible = false;
+    if (fb) {
+      var kf = Math.min(1, dt * 3);
       if (cam.follow) { cam.tx += (fb.pos.x - cam.tx) * kf; cam.tz += (fb.pos.z - cam.tz) * kf; clampPan(); }
       cam.ty += (fb.pos.y + 0.8 - cam.ty) * kf;
       if (cam.chase) {
@@ -1469,6 +1597,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     var a = $('devAddr').textContent, btn = $('copyAddr');
     function done(t) { btn.textContent = t; setTimeout(function () { btn.textContent = 'Copy address'; }, 1400); }
     try { navigator.clipboard.writeText(a).then(function () { done('Copied'); }, function () { done('Select it manually'); }); } catch (e) { done('Select it manually'); }
+  });
+  window.addEventListener('pagehide', function () {
+    if (DEV && DEV.sessionId && navigator.sendBeacon) {
+      try { navigator.sendBeacon('/api/leave', new Blob([JSON.stringify({ sessionId: DEV.sessionId })], { type: 'application/json' })); } catch (e) { /* ignore */ }
+    }
   });
   window.addEventListener('pagehide', save);
 
