@@ -85,3 +85,7 @@ node sweep.js --to <your address> --keep 0.05 --yes
 ```
 
 `sweep.js` refuses to run while the game server is up, checks that the RPC is devnet, and subtracts the network fee. Tell players your leftover policy before launch.
+
+## Top-ups (fees flowing into the pool)
+
+Every 15 seconds the server checks the reward wallet. Whatever arrived since the pool was built (creator fees, a manual transfer) becomes new hidden rewards once it adds up to `TOPUP_MIN_SOL` (default 0.01 SOL). New rewards go on levels that are not cleared yet, so they extend the level gating. Anything above `POOL_SOL` when the pool was first built is left alone. In a dry run you can pretend: `curl -X POST localhost:3000/api/dry-fund -H "origin: http://127.0.0.1:3000" -H "content-type: application/json" -d "{\"sol\":0.05}"`.

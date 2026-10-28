@@ -1246,6 +1246,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     } else if (e.e === 'paid') {
       if (b && b === player) log('View payout on devnet', 'win', 'https://explorer.solana.com/tx/' + e.sig + '?cluster=devnet');
       api('/api/state').then(adopt).catch(function () {});
+    } else if (e.e === 'topup') {
+      log('Reward pool topped up: +' + fmt(e.amt) + ' in ' + e.n + ' new hidden ' + (e.n === 1 ? 'reward' : 'rewards') + '.', 'win');
+      api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'unlock') {
       log('Level ' + e.lv + ' unlocked: every reward on the level above was found. Miners can dig down.', 'win');
     } else if (e.e === 'perr') {

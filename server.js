@@ -69,9 +69,10 @@ const payer = loadWallet();
 const connection = DRY_RUN ? null : new Connection(RPC_URL, 'confirmed');
 const explorer = 'https://explorer.solana.com';
 
+let dryExtra = 0;   // dry run only: pretend fees arrived, see /api/dry-fund
 let balanceCache = { at: 0, v: null };
 async function getBalance(force) {
-  if (DRY_RUN) return Math.round(POOL_SOL * LAMPORTS_PER_SOL) + RESERVE;
+  if (DRY_RUN) return Math.round(POOL_SOL * LAMPORTS_PER_SOL) + RESERVE + dryExtra;
   if (!force && Date.now() - balanceCache.at < 8000) return balanceCache.v;
   try {
     balanceCache = { at: Date.now(), v: await connection.getBalance(payer.publicKey, 'confirmed') };
@@ -95,6 +96,17 @@ const { createWorld, SLOTS, NN, N } = require('./world');
 const LV = NN / N;
 let pool = { total: 0, left: 0, cells: new Map() };
 function levelOfKey(k) { return Math.floor((k >= NN ? k - NN : k) / N); }
+let inflight = 0;     // rewards reserved for a payout that has not confirmed yet
+let excess = 0;       // balance above the configured pool when it was built; ignored by top-ups
+let avgReward = 0;
+// Splits `total` lamports over the given reward cells; deeper cells get bigger shares and every reward is at least MIN_REWARD.
+function splitAmounts(keys, total) {
+  const w = keys.map((k) => { const r = Math.random(); return (0.25 + r * r * 3) * (1 + 0.45 * levelOfKey(k)); });
+  const sum = w.reduce((a, b) => a + b, 0), spare = total - keys.length * MIN_REWARD;
+  const amts = w.map((x) => MIN_REWARD + Math.floor(spare * x / sum));
+  amts[amts.indexOf(Math.max(...amts))] += total - amts.reduce((a, b) => a + b, 0);
+  return amts;
+}
 let unlockedLv = 0;   // deepest level miners may reach right now
 function levelCounts() { const c = new Array(LV).fill(0); pool.cells.forEach((_, k) => { c[levelOfKey(k)]++; }); return c; }
 // A level opens the next one only when every reward hidden in it has been found.
@@ -115,15 +127,39 @@ async function buildPool() {
     const per = new Array(LV).fill(0);
     for (let i = 0; i < count; i++) per[i % LV]++;   // spread evenly; the top levels get any remainder
     const keys = world.pickRewardCells(per);
-    const w = keys.map((k) => { const r = Math.random(); return (0.25 + r * r * 3) * (1 + 0.45 * levelOfKey(k)); });
-    const sum = w.reduce((a, b) => a + b, 0), spare = total - keys.length * MIN_REWARD;
-    const amts = w.map((x) => MIN_REWARD + Math.floor(spare * x / sum));
-    amts[amts.indexOf(Math.max(...amts))] += total - amts.reduce((a, b) => a + b, 0);
+    const amts = splitAmounts(keys, total);
     keys.forEach((k, i) => cells.set(k, amts[i]));
   }
   pool = { total, left: total, cells };
+  excess = bal == null ? 0 : Math.max(0, bal - RESERVE - total);
+  avgReward = cells.size ? total / cells.size : 0;
   recomputeUnlock(true);
   console.log(`Pool ready: ${(total / LAMPORTS_PER_SOL).toFixed(4)} SOL hidden in ${cells.size} spots (difficulty ${DIFFICULTY}: ${PER_LEVEL} per level, blocks take ${HARD_MULT}x the hits, each level opens only when all its rewards are found)` + (DRY_RUN ? ' (dry run, nothing is sent)' : ''));
+}
+
+// Money that reached the reward wallet after the pool was built (creator fees, say) becomes new hidden rewards.
+const TOPUP_MIN = Math.round((Number(process.env.TOPUP_MIN_SOL) || 0.01) * LAMPORTS_PER_SOL);
+let toppingUp = false;
+async function topUp() {
+  if (toppingUp || pool.total === 0 || inflight > 0 || seasonOver()) return;
+  toppingUp = true;
+  try {
+    const bal = await getBalance(true);
+    if (bal == null || inflight > 0) return;
+    const spare = bal - RESERVE - excess - pool.left;
+    if (spare < TOPUP_MIN) return;
+    const count = Math.max(1, Math.min(MAX_REWARDS, Math.round(spare / Math.max(avgReward, 2 * MIN_REWARD)), Math.floor(spare / (2 * MIN_REWARD))));
+    const per = new Array(LV).fill(0), live = [];
+    for (let l = unlockedLv; l < LV; l++) live.push(l);
+    for (let i = 0; i < count; i++) per[live[i % live.length]]++;   // hidden on levels that are not cleared yet
+    const keys = world.pickRewardCells(per);
+    if (!keys.length) return;
+    const amts = splitAmounts(keys, spare);
+    keys.forEach((k, i) => pool.cells.set(k, amts[i]));
+    pool.total += spare; pool.left += spare;
+    world.emit({ e: 'topup', amt: spare, n: keys.length });
+    console.log(`Pool topped up: +${(spare / LAMPORTS_PER_SOL).toFixed(4)} SOL in ${keys.length} new spots`);
+  } finally { toppingUp = false; }
 }
 
 async function state() {
@@ -168,11 +204,14 @@ function onDig(m, info) {
   pool.cells.delete(key);
   recomputeUnlock();
   pool.left -= amt;   // reserved right away so two miners can never be paid the same reward
+  inflight += amt;
   pay(m.addr, amt).then((sig) => {
+    inflight -= amt;
     balanceCache.at = 0;
     world.emit({ e: 'paid', by: m.id, amt, sig });
     console.log(`Paid ${(amt / LAMPORTS_PER_SOL).toFixed(4)} SOL to ${m.addr} ${sig}`);
   }).catch((err) => {
+    inflight -= amt;
     pool.left += amt;
     const per = new Array(LV).fill(0); per[levelOfKey(key)] = 1;
     const again = world.pickRewardCells(per);   // put the unpaid reward back into a fresh hiding spot on the same level
@@ -324,6 +363,12 @@ const server = http.createServer(async (req, res) => {
       sess.verified = true; sess.challenge = null;
       return send(res, 200, { verified: true });
     }
+    if (url.pathname === '/api/dry-fund' && req.method === 'POST' && DRY_RUN) {
+      const body = await readBody(req);
+      dryExtra += Math.round((Number(body.sol) || 0) * LAMPORTS_PER_SOL);
+      await topUp();
+      return send(res, 200, await state());
+    }
     if (url.pathname === '/api/reset-pool' && req.method === 'POST') {
       await buildPool();
       return send(res, 200, await state());
@@ -364,6 +409,7 @@ const server = http.createServer(async (req, res) => {
     for (const [sid, sess] of sessions) if (now - sess.last > 20000) dropSession(sid);
     for (const c of clients) { try { c.write(': keepalive\n\n'); } catch (e) { clients.delete(c); } }
   }, 5000);
+  setInterval(() => { topUp().catch((e) => console.error('Top-up check failed: ' + e.message)); }, Number(process.env.TOPUP_EVERY_MS) || 15000);
   server.listen(PORT, '127.0.0.1', () => {
     console.log('');
     console.log('Bedrock Bots (devnet) running at http://127.0.0.1:' + PORT);
