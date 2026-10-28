@@ -108,7 +108,7 @@ Variables to set on Railway (devnet only for now):
 | `TRUST_PROXY` | `1` |
 | `MAX_PER_IP` | `1` |
 | `ALLOWED_ORIGINS` | your public address, e.g. `https://your-app.up.railway.app` |
-| `ADMIN_KEY` | a long random hex string (your admin link is that address plus `/#admin=<key>`) |
+| `ADMIN_KEY` | a long random string of letters and numbers (your admin link is that address plus `/#admin=<key>`) |
 | `REWARD_WALLET_JSON` | the throwaway devnet keypair as a JSON array (Railway has no persistent disk for `reward-wallet.json`) |
 | `DIFFICULTY`, `SEASON_END`, `POOL_SOL` | as you like |
 

@@ -1107,7 +1107,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Admin key comes from the private link (#admin=...). Only the server's check decides who is admin; hiding the button is cosmetic.
   var adminKey = '';
   try {
-    var hm = /admin=([0-9a-fA-F]+)/.exec(location.hash);
+    var hm = /admin=([A-Za-z0-9_-]+)/.exec(location.hash);
     if (hm) { adminKey = hm[1]; sessionStorage.setItem('bbAdmin', adminKey); history.replaceState(null, '', location.pathname + location.search); }
     else adminKey = sessionStorage.getItem('bbAdmin') || '';
   } catch (e) { /* storage blocked: admin link then works until reload */ }
