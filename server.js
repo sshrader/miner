@@ -43,6 +43,9 @@ const UI = () => Math.pow(10, DEC);
 const MIN_HOLD_UI = Math.max(0, Number(process.env.MIN_HOLD) || 0);
 const MAX_WALLET_PAYOUT_UI = Math.max(0, Number(process.env.MAX_WALLET_PAYOUT) || 0);
 const HOLD_REQUIRED = TOKEN_MODE && MIN_HOLD_UI > 0;
+// By default anyone can paste an address and mine (rewards go to that address, so borrowing someone else's gains nothing).
+// REQUIRE_SIGNATURE=1 makes every miner prove ownership with a wallet signature instead.
+const REQUIRE_SIGNATURE = process.env.REQUIRE_SIGNATURE === '1';
 const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 
 // Difficulty presets. Easy is for testing; harder ones are for a live game. Any single setting can be overridden with its own variable.
@@ -244,6 +247,7 @@ async function state() {
     asset: { token: TOKEN_MODE, sym: TOKEN_SYMBOL, dec: DEC },
     mint: TOKEN_MINT || null,
     holdRequired: HOLD_REQUIRED,
+    requireSig: REQUIRE_SIGNATURE,
     minHold: MIN_HOLD,
     solBalance: TOKEN_MODE ? await getSol(false) : undefined,
     rewardWallet: payer.publicKey.toBase58(),
@@ -445,23 +449,30 @@ const server = http.createServer(async (req, res) => {
         for (const s2 of sessions.values()) if (s2.ip === ip && s2.address !== addr) n++;
         if (n >= MAX_PER_IP) return send(res, 429, { error: 'Only ' + MAX_PER_IP + (MAX_PER_IP === 1 ? ' miner is' : ' miners are') + ' allowed per connection. Disconnect your other wallet first.' });
       }
-      // Mines that pay a token check who is asking (a signature) and what they hold.
+      // A signature proves the address belongs to the person asking. It is optional unless REQUIRE_SIGNATURE=1.
       let hold = null, proven = false;
+      const ch = challenges.get(addr);
+      challenges.delete(addr);
+      if (body.signature && !DRY_RUN) {
+        let ok = false;
+        try { ok = !!ch && Date.now() - ch.at < 120000 && verifySig(addr, ch.message, String(body.signature)); } catch (e) { ok = false; }
+        if (!ok) return send(res, 403, { error: 'That signature did not check out. Try again.' });
+        proven = true;
+      } else if (REQUIRE_SIGNATURE && !DRY_RUN) {
+        return send(res, 403, { error: 'Please connect your wallet and sign the message to prove you own this address.' });
+      }
       if (HOLD_REQUIRED) {
-        if (!DRY_RUN) {
-          const ch = challenges.get(addr);
-          challenges.delete(addr);
-          let ok = false;
-          try { ok = !!ch && Date.now() - ch.at < 120000 && verifySig(addr, ch.message, String(body.signature || '')); } catch (e) { ok = false; }
-          if (!ok) return send(res, 403, { error: 'Please sign the message in your wallet to prove you own this address.' });
-          proven = true;
-        }
         hold = await holderBalance(addr);
         if (hold == null) return send(res, 503, { error: 'Could not check your ' + TOKEN_SYMBOL + ' balance right now. Try again in a moment.' });
         if (hold < MIN_HOLD) return send(res, 403, { error: 'You need at least ' + (MIN_HOLD / UI()).toLocaleString('en-US') + ' ' + TOKEN_SYMBOL + ' to mine. This wallet holds ' + (hold / UI()).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '.' });
       }
-      // One miner per wallet: a new session for the same address replaces the old one.
-      for (const [sid, s2] of sessions) if (s2.address === addr) dropSession(sid);
+      // One miner per wallet. The same person coming back (same connection, or proven by signature) replaces their old miner.
+      // Someone else pasting an address that is already mining is turned away, so nobody can kick a holder out of the mine.
+      for (const [sid, s2] of sessions) {
+        if (s2.address !== addr) continue;
+        if (!proven && s2.ip !== ip) return send(res, 409, { error: 'That address is already mining. If it is yours on another device, connect your wallet and sign to take over.' });
+        dropSession(sid);
+      }
       const miner = world.addMiner(addr, hashStr(addr) % 360);
       if (!miner) return send(res, 409, { error: 'The mine is full (' + SLOTS + ' miners). Try again in a bit.' });
       const id = crypto.randomBytes(12).toString('hex');

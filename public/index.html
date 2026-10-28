@@ -95,12 +95,17 @@ canvas:active { cursor: grabbing; }
 .pop.sim { font-size: 16px; color: #E8C98E; }
 @keyframes rise { 0% { opacity: 0; transform: translate(-50%, -30%) scale(0.7); } 12% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -260%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
-.gate { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(6, 5, 10, 0.62); }
+.gate { position: absolute; z-index: 6; inset: 0; overflow-y: auto; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(6, 5, 10, 0.62); }
 .gate[hidden] { display: none; }
 .gate-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
 .gate-card h2 { margin: 0; font: 700 24px/1.1 var(--font-display); }
 .gate-card p { margin: 0; color: var(--muted); font-size: 15px; }
 .gate-card .msg { color: var(--fg); background: var(--panel-2); border-radius: 6px; padding: 8px 10px; font-size: 14px; }
+.pasteform { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.pasteform[hidden] { display: none; }
+.pasteform label { color: var(--muted); font-size: 13px; }
+.pasteform input { min-height: 40px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--fg); font: 500 13px var(--font-mono); }
+.pasteform input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .gate-card a { color: var(--accent); font-weight: 600; }
 
 .btn { font: 600 15px var(--font-body); min-height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
@@ -195,13 +200,18 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
             <h2>Enter the mine</h2>
             <p id="gateTxt">Connect your Phantom wallet and a miner lowers into the cave to start digging.</p>
             <button class="btn btn-primary" id="connectBtn" type="button">Connect Phantom</button>
+            <form class="pasteform" id="pasteForm" hidden>
+              <label for="pasteAddr">Or paste a wallet address. Nothing to connect or sign.</label>
+              <input id="pasteAddr" autocomplete="off" spellcheck="false" placeholder="Your Solana address" maxlength="44">
+              <button class="btn btn-ghost" type="submit">Start with this address</button>
+            </form>
             <button class="btn btn-ghost" id="demoBtn" type="button">Try demo mode</button>
             <p class="msg" id="msg" role="status" hidden></p>
             <a id="installLink" href="https://phantom.app/" target="_blank" rel="noopener" hidden>Get Phantom</a>
           </div>
         </div>
       </div>
-      <p class="fine">Connecting shares your public address only. Phantom is never asked to approve a transaction. The optional wallet check signs a short text message.</p>
+      <p class="fine">Connecting (or pasting) shares your public address only. Phantom is never asked to approve a transaction. The optional wallet check signs a short text message.</p>
     </section>
 
     <aside class="side left" aria-label="Miner and rewards">
@@ -1139,17 +1149,18 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     connectStream();
     setInterval(pingSession, 5000);
     applyAssetLabels();
+    $('pasteForm').hidden = !!s.requireSig;
     $('devCard').hidden = false;
     startChat();
     updateStats();
     setInterval(function () { api('/api/state').then(adopt).catch(function () {}); }, 15000);
   }
   var ready = api('/api/state').then(function (s) { if (s && s.devnet) applyDev(s); }).catch(function () { /* plain simulated mode */ });
-  function begin(addr) {
+  function begin(addr, pasted) {
     if (!DEV) { startSession(addr, 'wallet'); return; }
     var p = getProvider(), step = Promise.resolve(null);
     // A mine that requires a minimum holding also needs proof that you own the address (a free signed message, never a transaction).
-    if (DEV.holdRequired && !DEV.dryRun) {
+    if (!pasted && DEV.holdRequired && !DEV.dryRun) {
       if (!p || !p.signMessage) { showMsg('This wallet cannot sign messages, which this mine needs to check your ' + unitSym() + ' holding.', false); return; }
       setStatus('Waiting for your signature');
       step = api('/api/challenge', { address: addr }).then(function (r) {
@@ -1166,6 +1177,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = !!r.verified;
       $('verifyBtn').textContent = r.verified ? 'Verified \u2713' : 'Verify my wallet';
       startSession(addr, 'wallet');
+      if (session) session.pasted = !!pasted;
+      $('verifyBtn').disabled = !!pasted || !!DEV.verified;
     }).catch(function (e) {
       setStatus('Idle');
       showMsg(e && e.code === 4001 ? 'The signature request was declined, so no miner was sent in.' : (e && e.message) || 'Could not start a devnet session.', false);
@@ -1319,7 +1332,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function updateChatUi() {
     var on = !!(DEV && DEV.sessionId);
     $('chatInput').disabled = !on;
-    $('verifyBtn').disabled = !on || !!DEV.verified;
+    $('verifyBtn').disabled = !on || !!DEV.verified || !!(session && session.pasted);
   }
   function renderChat(msgs) {
     var ul = $('chatLog');
@@ -1401,7 +1414,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     var p = getProvider();
     if (!p) return;
     if (p.on) {
-      p.on('disconnect', function () { if (session && session.kind === 'wallet' && !p.isConnected) endSession(); });
+      p.on('disconnect', function () { if (session && session.kind === 'wallet' && !session.pasted && !p.isConnected) endSession(); });
       p.on('accountChanged', function (pk) { if (pk) begin(pk.toString()); else if (session && session.kind === 'wallet') endSession(); });
     }
     try {
@@ -1716,7 +1729,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   /* ---------- wallet menu: copy address, change wallet, disconnect ---------- */
   function closeWalletMenu() { $('walletMenu').hidden = true; $('walletChip').setAttribute('aria-expanded', 'false'); }
   function disconnectWallet() {
-    var wasWallet = session && session.kind === 'wallet';
+    var wasWallet = session && session.kind === 'wallet' && !session.pasted;
     var p = getProvider();
     if (wasWallet && p && p.disconnect) { try { p.disconnect(); } catch (e) { /* ignore */ } }
     if (session) endSession();
@@ -1727,7 +1740,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     var m = $('walletMenu'); m.hidden = !m.hidden;
     $('walletChip').setAttribute('aria-expanded', String(!m.hidden));
     $('wmCopy').hidden = session.kind !== 'wallet';
-    $('wmChange').textContent = session.kind === 'wallet' ? 'Change wallet' : 'Use a wallet instead';
+    $('wmChange').textContent = session.pasted ? 'Use a different address' : (session.kind === 'wallet' ? 'Change wallet' : 'Use a wallet instead');
     $('wmDisc').textContent = session.kind === 'wallet' ? 'Disconnect' : 'Leave demo';
   });
   document.addEventListener('click', closeWalletMenu);
@@ -1743,13 +1756,21 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   $('wmDisc').addEventListener('click', function () { closeWalletMenu(); disconnectWallet(); });
   $('wmChange').addEventListener('click', function () {
     closeWalletMenu();
+    var wasPasted = !!(session && session.pasted);
     disconnectWallet();
+    if (wasPasted) { setTimeout(function () { if (!$('pasteForm').hidden) $('pasteAddr').focus(); }, 100); return; }
     // Phantom asks which account to connect again, so this is how you switch wallets.
     setTimeout(connectWallet, 250);
   });
 
   /* ---------- events ---------- */
   $('connectBtn').addEventListener('click', connectWallet);
+  $('pasteForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var a = $('pasteAddr').value.replace(/\s+/g, '');
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) { showMsg('That does not look like a Solana address. It is 32 to 44 letters and numbers.', false); return; }
+    begin(a, true);
+  });
   $('demoBtn').addEventListener('click', function () { startSession('demo', 'demo'); });
   $('leaveBtn').addEventListener('click', function () {
     var wasWallet = session && session.kind === 'wallet';

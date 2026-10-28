@@ -135,7 +135,7 @@ Rewards can be paid in an SPL token instead of SOL, and mining can require holdi
 | `HOLD_RECHECK_MS` | How often holders are re-checked (default 60000) |
 
 With `MIN_HOLD` set:
-- A wallet signs a free message in Phantom (proof it owns the address, never a transaction), then the server checks its balance. Below the minimum, no miner is sent in and the page says how much is needed.
+- Players can **paste a wallet address** (nothing to connect) or **connect Phantom and sign a free message** (proof they own it, never a transaction). Either way the server checks the balance; below the minimum, no miner is sent in and the page says how much is needed. Rewards are paid to the address, so pasting someone else's address only sends them tokens. A pasted address shows as unverified in chat, and someone else cannot kick it out: a second device must connect and sign to take over. Set `REQUIRE_SIGNATURE=1` to turn pasting off and require a signature from everyone.
 - Every minute the server checks holders again; a wallet that sold below the minimum is removed from the mine.
 - Right before a payout it checks once more. If the balance dropped, the reward goes back into the mine.
 - Both the classic Token program and Token-2022 mints work (detected from the mint).
