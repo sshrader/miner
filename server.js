@@ -12,6 +12,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';               // use 0.0.0.0 on a host like Railway
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';        // set to 1 only when a trusted proxy (Railway) sits in front
 const MAX_PER_IP = Math.max(0, Number(process.env.MAX_PER_IP) || 0);   // miners allowed per connection address; 0 = no limit
+const IP_SWITCH_MS = Math.max(0, Number(process.env.IP_SWITCH_MINUTES === undefined ? 10 : process.env.IP_SWITCH_MINUTES)) * 60000;   // with MAX_PER_IP: how long a connection is tied to the last address it mined with
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 const POOL_SOL = parseFloat(process.env.POOL_SOL || '0.5');
@@ -350,9 +351,11 @@ const world = createWorld({
 
 const kicked = new Map();   // sessionId -> reason, so the page can say why
 function kick(sid, reason) { kicked.set(sid, reason); setTimeout(() => kicked.delete(sid), 120000); dropSession(sid); }
+const ipLast = new Map();   // ip -> { address, at }: the last address a connection mined with
 function dropSession(sid) {
   const sess = sessions.get(sid);
   if (!sess) return;
+  if (sess.ip) ipLast.set(sess.ip, { address: sess.address, at: Date.now() });
   sessions.delete(sid);
   world.removeMiner(sess.minerId);
   console.log('Miner ' + sess.minerId + ' left: ' + sess.address);
@@ -448,6 +451,10 @@ const server = http.createServer(async (req, res) => {
         let n = 0;
         for (const s2 of sessions.values()) if (s2.ip === ip && s2.address !== addr) n++;
         if (n >= MAX_PER_IP) return send(res, 429, { error: 'Only ' + MAX_PER_IP + (MAX_PER_IP === 1 ? ' miner is' : ' miners are') + ' allowed per connection. Disconnect your other wallet first.' });
+      }
+      if (MAX_PER_IP > 0 && IP_SWITCH_MS > 0) {
+        const last = ipLast.get(ip), wait = last ? IP_SWITCH_MS - (nowMs - last.at) : 0;
+        if (last && last.address !== addr && wait > 0) return send(res, 429, { error: 'This connection recently mined as ' + last.address.slice(0, 4) + '…' + last.address.slice(-4) + '. Use that address, or wait ' + Math.ceil(wait / 60000) + ' minute' + (wait > 60000 ? 's' : '') + ' to switch.' });
       }
       // A signature proves the address belongs to the person asking. It is optional unless REQUIRE_SIGNATURE=1.
       let hold = null, proven = false;

@@ -96,7 +96,7 @@ Every 15 seconds the server checks the reward wallet. Whatever arrived since the
 
 ## Limits per connection, and hosting (Railway)
 
-`MAX_PER_IP=1` allows one miner per connection address (a second wallet from the same IP is refused; the same wallet reconnecting just replaces its old miner). Joins are also limited to 10 per minute per IP. IPv6 users are grouped by their /64 block. This is a speed bump, not a guarantee: VPNs get around it, and people sharing a home or mobile network share a limit. Pair it with a minimum holding when real value is involved.
+`MAX_PER_IP=1` allows one miner per connection address (a second wallet from the same IP is refused; the same wallet reconnecting just replaces its old miner). Joins are also limited to 10 per minute per IP. With `MAX_PER_IP` on, a connection is also tied to the last address it mined with for `IP_SWITCH_MINUTES` (default 10; `0` turns it off), so nobody can hop between wallets to reuse the same tokens. Coming back with the same address is always fine. IPv6 users are grouped by their /64 block. This is a speed bump, not a guarantee: VPNs get around it, and people sharing a home or mobile network share a limit. Pair it with a minimum holding when real value is involved.
 
 Behind a host like Railway the server sees the proxy's address, so set `TRUST_PROXY=1` to read the visitor's real IP from the proxy headers. Only do that when a trusted proxy really is in front; on a directly exposed server the header can be forged.
 
