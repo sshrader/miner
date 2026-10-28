@@ -19,6 +19,11 @@ const IP_SWITCH_MS = Math.max(0, Number(process.env.IP_SWITCH_MINUTES === undefi
 const QUEUE_AGE_MS = Math.max(0, Number(process.env.QUEUE_AGE_MINUTES === undefined ? 10 : process.env.QUEUE_AGE_MINUTES)) * 60000;
 const SHIFT_MS = Math.max(0, Number(process.env.SHIFT_MINUTES) || 0) * 60000;
 const MAX_QUEUE = 500;
+// Auto scaling: with more miners digging, blocks take more hits, so a big crowd drains the pool no faster than a small one.
+//   AUTO_SCALE=0 turns it off; REF_MINERS = crowd size at which blocks start getting harder (default 6); HARD_CAP = highest multiplier (default 30)
+const AUTO_SCALE = process.env.AUTO_SCALE !== '0';
+const REF_MINERS = Math.max(1, Number(process.env.REF_MINERS) || 6);
+const HARD_CAP = Math.max(1, Number(process.env.HARD_CAP) || 30);
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 const POOL_SOL = parseFloat(process.env.POOL_SOL || '0.5');
@@ -266,6 +271,9 @@ async function state() {
     miners: world.miners.size,
     maxMiners: SLOTS,
     queueLength: queue.size,
+    hardMult: curHard,
+    baseHardMult: HARD_MULT,
+    autoScale: AUTO_SCALE,
     queueAgeMinutes: QUEUE_AGE_MS / 60000,
     shiftMinutes: SHIFT_MS / 60000,
     difficulty: DIFFICULTY,
@@ -357,6 +365,15 @@ const world = createWorld({
     recomputeUnlock(true);
   }
 }, { hardMult: HARD_MULT });
+let curHard = HARD_MULT;
+function scaleHardness() {
+  if (!AUTO_SCALE) return;
+  const n = world.miners.size;
+  const target = Math.min(Math.max(HARD_MULT, HARD_CAP), HARD_MULT * Math.max(1, n / REF_MINERS));
+  const rounded = Math.round(Math.min(target, HARD_CAP) * 4) / 4;   // steps of 0.25 so it does not flicker
+  const next = Math.max(HARD_MULT, rounded);
+  if (Math.abs(next - curHard) >= 0.25) { curHard = next; world.setHardMult(curHard); console.log(`Block hardness x${curHard} for ${n} miners`); }
+}
 
 const kicked = new Map();   // sessionId -> reason, so the page can say why
 function kick(sid, reason) { kicked.set(sid, reason); setTimeout(() => kicked.delete(sid), 120000); dropSession(sid); }
@@ -371,7 +388,7 @@ function dropSession(sid) {
   setImmediate(() => { promote().catch(() => {}); });   // a place just opened: let the next person in line in
 }
 function tickMsg(ev) {
-  return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: unlockedLv + 1, lv: levelCounts(), over: seasonOver() } };
+  return { t: 'tick', hm: curHard, m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: unlockedLv + 1, lv: levelCounts(), over: seasonOver() } };
 }
 function broadcast(obj) {
   const line = 'data: ' + JSON.stringify(obj) + '\n\n';
@@ -548,6 +565,7 @@ const server = http.createServer(async (req, res) => {
       const ticket = crypto.randomBytes(12).toString('hex');
       queue.set(ticket, entry);
       promote();
+    scaleHardness();
       const order = queueOrder().map((x) => x[0]);
       console.log('Queued: ' + addr + ' (#' + (order.indexOf(ticket) + 1) + ')');
       return send(res, 200, { queued: true, ticket, position: order.indexOf(ticket) + 1, size: queue.size });

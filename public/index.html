@@ -1134,7 +1134,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('devAddr').textContent = s.rewardWallet;
     $('devBal').textContent = s.balance == null ? 'RPC unreachable' : fmt(s.balance) + (isTok() && s.solBalance != null ? ' + ' + (s.solBalance / 1e9).toFixed(3) + ' SOL for fees' : '');
     $('devNote').textContent = s.dryRun ? 'Dry run: no transactions are sent, payouts are fake.' :
-      (s.needsFunding ? (isTok() ? 'Send ' + unitSym() + ' and a little devnet SOL (for fees) to this address; the pool builds itself once it arrives.' : 'Send devnet SOL to this address (faucet.solana.com); the pool builds itself once it arrives.') : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + '.' + (s.holdRequired ? ' Mining requires holding at least ' + fmt(s.minHold) + '.' : '');
+      (s.needsFunding ? (isTok() ? 'Send ' + unitSym() + ' and a little devnet SOL (for fees) to this address; the pool builds itself once it arrives.' : 'Send devnet SOL to this address (faucet.solana.com); the pool builds itself once it arrives.') : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + (s.hardMult ? ' (blocks take ' + s.hardMult + 'x the hits' + (s.autoScale && s.hardMult > s.baseHardMult ? ', raised for the crowd' : '') + ')' : '') + '.' + (s.holdRequired ? ' Mining requires holding at least ' + fmt(s.minHold) + '.' : '');
     applyAssetLabels();
     if (s.needsFunding && !session) showMsg('The reward pool is not funded yet. Check back soon.', false);
     if (s.maxMiners) $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to ' + s.maxMiners + ' miners at once' + (s.queueLength ? ', ' + s.queueLength + ' waiting in line.' : '.') + (s.shiftMinutes ? ' Shifts last ' + s.shiftMinutes + ' minutes when others are waiting.' : '');
@@ -1295,6 +1295,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
   var STATE_WORD = { spawn: 'Descending', think: 'Thinking', wait: 'Waiting', move: 'Walking', mine: 'Digging', descend: 'Dropping down', celebrate: 'Found something', idle: 'Opening a new mine' };
   function netTick(m) {
+    if (m.hm && m.hm !== hardMult) { hardMult = m.hm; if (DEV) { DEV.hardMult = m.hm; applyAssetLabels(); } }
     if (m.pool.over && !netTick.over) { netTick.over = true; log('The season has ended. The mine is closed and no more rewards will be paid.', 'sim'); setStatus('Season ended'); }
     var key = m.pool.left + ':' + m.pool.rewards + ':' + m.pool.unlocked;
     if (key !== lastPoolKey) {

@@ -156,3 +156,9 @@ When the mine is full, new people join a **waiting line** and are let in automat
 `SHIFT_MINUTES=30` (default `0` = off) limits how long a miner can stay while others are waiting: the longest-serving miner is rotated out and the next in line takes the place. A removed miner can join the line again.
 
 More miners finds rewards much faster. Simulated time for the miners together to clear level 1: 12 miners about 1 to 4 minutes (easy to brutal), 50 miners about 1 to 2 minutes. Raise `HARD_MULT` (up to 10) and `REWARDS_PER_LEVEL` (up to 30) for bigger crowds, or use `SEASON_END`, and keep an eye on how fast the pool drains.
+
+## Auto scaling
+
+By default (`AUTO_SCALE=1`) blocks get harder as more miners join, so a crowd of 50 does not drain the pool far faster than a crowd of 6. The multiplier is your difficulty's `HARD_MULT` times `miners / REF_MINERS` (never below the base), re-checked every few seconds in steps of 0.25 and capped at `HARD_CAP` (default 30). `REF_MINERS` defaults to 6: with 12 miners blocks take twice the hits, with 50 miners about 8 times. The left panel shows the current figure.
+
+Simulated time to clear level 1 on `easy`: 6 miners about 2 minutes, 50 miners about 2 minutes (without scaling: about 1). To make everything slower, raise `DIFFICULTY` or `HARD_MULT`, or lower `REF_MINERS` (for example 3 doubles the hardness at any crowd size). `AUTO_SCALE=0` switches it off.

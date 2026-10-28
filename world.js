@@ -92,7 +92,8 @@ const ITERS = [4, 3, 4, 3, 4, 3, 4, 3];
 
 // hooks.onDig(miner, info) is called for every block or floor a miner breaks. It returns a reward in lamports (0 for none).
 function createWorld(hooks, opts) {
-  const hardMult = (opts && opts.hardMult) || 1;   // multiplies how many hits every block and floor takes
+  let hardMult = (opts && opts.hardMult) || 1;   // multiplies how many hits every block and floor takes (the server can change it as the crowd grows)
+  const setHardMult = (x) => { hardMult = Math.max(0.5, Math.min(30, Number(x) || 1)); };
   const need = (type) => Math.ceil(HARD[type] * hardMult);
   const grid = new Uint8Array(NN), dmg = new Uint8Array(NN), fgrid = new Uint8Array(NN), fdmg = new Uint8Array(NN);
   const claim = new Uint8Array(2 * NN);          // wall targets use g, floor targets use NN + g; value is slot + 1
@@ -378,7 +379,7 @@ function createWorld(hooks, opts) {
   function setUnlocked(u) { unlocked = Math.max(0, Math.min(LV - 1, u | 0)); }
 
   genWorld();
-  return { pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
+  return { setHardMult, getHardMult: () => hardMult, pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
 }
 
 module.exports = { createWorld, SLOTS, NN, N };
