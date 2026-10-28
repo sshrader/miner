@@ -18,7 +18,7 @@ let Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTr
 if (!DRY_RUN) ({ Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } = require('@solana/web3.js'));
 const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 
-const MAX_REWARDS = 60;
+const MAX_REWARDS = Math.max(1, Math.min(300, Number(process.env.REWARDS) || 60));   // hidden rewards the pool is split into
 const MIN_REWARD = 1000000;               // 0.001 SOL; also clears the rent minimum for a brand-new recipient account
 const RESERVE = 2000000 + MAX_REWARDS * 5000; // keep rent minimum + fees in the reward wallet
 const WALLET_FILE = path.join(__dirname, 'reward-wallet.json');
@@ -70,30 +70,26 @@ function shuffle(a) {
   return a;
 }
 
-// The pool: `total` lamports split into `count` rewards, each hidden behind a server-chosen dig number.
-let pool = { total: 0, left: 0, digs: 0, rewards: new Map(), retry: [] };
+// The pool: `total` lamports split into `count` rewards, each hidden inside one specific block or floor of the shared mine.
+// Deeper spots hold bigger shares. A miner is paid when it breaks the block that holds a reward.
+let pool = { total: 0, left: 0, cells: new Map() };
+function levelOfKey(k) { return Math.floor((k >= NN ? k - NN : k) / N); }
 async function buildPool() {
   const bal = await getBalance(true);
   const cfg = Math.round(POOL_SOL * LAMPORTS_PER_SOL);
   const total = bal == null ? 0 : Math.max(0, Math.min(cfg, bal - RESERVE));
   const count = Math.min(MAX_REWARDS, Math.floor(total / (2 * MIN_REWARD)));
-  const rewards = new Map();
+  const cells = new Map();
   if (count > 0) {
-    const w = [];
-    let sum = 0;
-    for (let i = 0; i < count; i++) { const r = Math.random(); w.push(0.25 + r * r * 3); sum += w[i]; }
-    const spare = total - count * MIN_REWARD;
+    const keys = world.pickRewardCells(count);
+    const w = keys.map((k) => { const r = Math.random(); return (0.25 + r * r * 3) * (1 + 0.45 * levelOfKey(k)); });
+    const sum = w.reduce((a, b) => a + b, 0), spare = total - keys.length * MIN_REWARD;
     const amts = w.map((x) => MIN_REWARD + Math.floor(spare * x / sum));
-    let got = amts.reduce((a, b) => a + b, 0);
-    amts[amts.indexOf(Math.max(...amts))] += total - got;
-    const span = Math.max(count * 8, 20);
-    const idx = shuffle(Array.from({ length: span }, (_, i) => i + 1)).slice(0, count);
-    if (Math.min(...idx) > 12) idx[idx.indexOf(Math.min(...idx))] = 1 + crypto.randomInt(12);
-    shuffle(amts);
-    idx.forEach((d, i) => rewards.set(d, amts[i]));
+    amts[amts.indexOf(Math.max(...amts))] += total - amts.reduce((a, b) => a + b, 0);
+    keys.forEach((k, i) => cells.set(k, amts[i]));
   }
-  pool = { total, left: total, digs: 0, rewards, retry: [] };
-  console.log(`Pool ready: ${(total / LAMPORTS_PER_SOL).toFixed(4)} SOL in ${count} hidden rewards` + (DRY_RUN ? ' (dry run, nothing is sent)' : ''));
+  pool = { total, left: total, cells };
+  console.log(`Pool ready: ${(total / LAMPORTS_PER_SOL).toFixed(4)} SOL hidden in ${cells.size} spots across ${LV} levels` + (DRY_RUN ? ' (dry run, nothing is sent)' : ''));
 }
 
 async function state() {
@@ -107,7 +103,7 @@ async function state() {
     balance: bal,
     poolTotal: pool.total,
     poolLeft: pool.left,
-    rewardsLeft: pool.rewards.size + pool.retry.length,
+    rewardsLeft: pool.cells.size,
     needsFunding: pool.total === 0,
     miners: world.miners.size,
     maxMiners: SLOTS,
@@ -123,30 +119,40 @@ async function pay(address, lamports) {
 
 const sessions = new Map();
 const clients = new Set();
-const { createWorld, SLOTS } = require('./world');
+const { createWorld, SLOTS, NN, N } = require('./world');
+const LV = NN / N;
 function hashStr(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
 
 // Called by the shared mine for every block or floor a miner breaks. The server alone decides which digs pay.
-function onDig(m) {
-  pool.digs++;
-  let amt = 0;
-  if (pool.retry.length) amt = pool.retry.shift();
-  else if (pool.rewards.has(pool.digs)) { amt = pool.rewards.get(pool.digs); pool.rewards.delete(pool.digs); }
+function onDig(m, info) {
+  const key = info.kind === 'floor' ? NN + info.g : info.g;
+  const amt = pool.cells.get(key) || 0;
   if (!amt) return 0;
+  pool.cells.delete(key);
   pool.left -= amt;   // reserved right away so two miners can never be paid the same reward
   pay(m.addr, amt).then((sig) => {
     balanceCache.at = 0;
     world.emit({ e: 'paid', by: m.id, amt, sig });
     console.log(`Paid ${(amt / LAMPORTS_PER_SOL).toFixed(4)} SOL to ${m.addr} ${sig}`);
   }).catch((err) => {
-    pool.left += amt; pool.retry.push(amt);
+    pool.left += amt;
+    const again = world.pickRewardCells(1);   // put the unpaid reward back into a fresh hiding spot
+    if (again.length) pool.cells.set(again[0], amt);
     const msg = 'Payout failed, will retry on a later dig: ' + String((err && err.message) || err).slice(0, 140);
     world.emit({ e: 'perr', by: m.id, msg });
     console.error(msg);
   });
   return amt;
 }
-const world = createWorld({ onDig });
+const world = createWorld({
+  onDig,
+  // The mine was dug out and rebuilt: hide the rewards that are left in the new cave.
+  onRegen() {
+    const amts = Array.from(pool.cells.values());
+    pool.cells.clear();
+    world.pickRewardCells(amts.length).forEach((k, i) => pool.cells.set(k, amts[i]));
+  }
+});
 
 function dropSession(sid) {
   const sess = sessions.get(sid);
@@ -156,7 +162,7 @@ function dropSession(sid) {
   console.log('Miner ' + sess.minerId + ' left: ' + sess.address);
 }
 function tickMsg(ev) {
-  return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.rewards.size + pool.retry.length } };
+  return { t: 'tick', m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size } };
 }
 function broadcast(obj) {
   const line = 'data: ' + JSON.stringify(obj) + '\n\n';

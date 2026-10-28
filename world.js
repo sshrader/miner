@@ -2,7 +2,8 @@
 // The shared mine. The server owns the cave, every miner and every block, and ticks it forward.
 // Browsers only draw what this module reports, so everyone sees the same world in the same place.
 
-const X = 36, Z = 26, N = X * Z, LV = 4, NN = LV * N, PH = 2, FT = 1, LH = PH + FT;
+const X = 48, Z = 34, N = X * Z, LV = 8, NN = LV * N, PH = 2, FT = 1, LH = PH + FT;
+const VOID = 6;                                // solid nothing outside a level's outline: not drawn, not diggable
 const HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
 const SLOTS = Math.max(1, Math.min(16, Number(process.env.MAX_MINERS) || 12));   // most miners in the mine at once
 const HARD = [0, 3, 4, 2, 0, 999];                 // hits to break: 1 rock, 2 deep rock, 3 coal, 5 edge rock
@@ -22,16 +23,40 @@ function shuffle(a) {
   return a;
 }
 
-// Random fill, smoothed by a cellular rule, keeping only the biggest connected cavern.
-function genCave() {
+// Each level gets its own irregular outline: a main blob with a few lobes and wobbling edges, narrowing with depth.
+function footprint(l) {
+  const mask = new Uint8Array(N);
+  const scale = 0.85 - 0.04 * l + (Math.random() - 0.5) * 0.1;
+  const main = { cx: X / 2 + (Math.random() - 0.5) * 8, cz: Z / 2 + (Math.random() - 0.5) * 6, rx: X / 2 * scale, rz: Z / 2 * scale };
+  const blobs = [main], lobes = 1 + ((Math.random() * 3) | 0);
+  for (let i = 0; i < lobes; i++) {
+    const a = Math.random() * Math.PI * 2;
+    blobs.push({ cx: main.cx + Math.cos(a) * main.rx * 0.65, cz: main.cz + Math.sin(a) * main.rz * 0.65, rx: main.rx * (0.4 + Math.random() * 0.25), rz: main.rz * (0.4 + Math.random() * 0.25) });
+  }
+  blobs.forEach((b) => {
+    b.a2 = 0.12 + Math.random() * 0.1; b.p2 = Math.random() * 6.28;
+    b.a3 = 0.08 + Math.random() * 0.1; b.p3 = Math.random() * 6.28;
+    b.a5 = 0.04 + Math.random() * 0.06; b.p5 = Math.random() * 6.28;
+  });
+  for (let z = 1; z < Z - 1; z++) for (let x = 1; x < X - 1; x++) {
+    for (const b of blobs) {
+      const dx = (x + 0.5 - b.cx) / b.rx, dz = (z + 0.5 - b.cz) / b.rz, th = Math.atan2(dz, dx);
+      const r = 1 + b.a2 * Math.sin(2 * th + b.p2) + b.a3 * Math.sin(3 * th + b.p3) + b.a5 * Math.sin(5 * th + b.p5);
+      if (Math.sqrt(dx * dx + dz * dz) <= r) { mask[z * X + x] = 1; break; }
+    }
+  }
+  return mask;
+}
+
+// Random fill inside the outline, smoothed by a cellular rule, keeping only the biggest connected cavern.
+function genCave(interior, count, fill, iters) {
   for (let tries = 1; ; tries++) {
     let open = new Uint8Array(N);
-    for (let z = 0; z < Z; z++) for (let x = 0; x < X; x++) {
-      open[z * X + x] = (x === 0 || z === 0 || x === X - 1 || z === Z - 1) ? 0 : (Math.random() < 0.55 ? 1 : 0);
-    }
-    for (let it = 0; it < 4; it++) {
+    for (let i = 0; i < N; i++) if (interior[i] && Math.random() < fill) open[i] = 1;
+    for (let it = 0; it < iters; it++) {
       const nxt = new Uint8Array(N);
       for (let z = 1; z < Z - 1; z++) for (let x = 1; x < X - 1; x++) {
+        if (!interior[z * X + x]) continue;
         let w = 0;
         for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
           const ox = x + dx, oz = z + dz;
@@ -56,17 +81,19 @@ function genCave() {
       if (size > bestSize) { bestSize = size; best = cid; }
       cid++;
     }
-    if (bestSize < 280 && tries < 30) continue;
+    if (bestSize < Math.max(90, count * 0.2) && tries < 40) continue;
     for (let i = 0; i < N; i++) if (open[i] && comp[i] !== best) open[i] = 0;
     return open;
   }
 }
+const FILL = [0.55, 0.5, 0.56, 0.49, 0.55, 0.51, 0.56, 0.5];
+const ITERS = [4, 3, 4, 3, 4, 3, 4, 3];
 
 // hooks.onDig(miner, info) is called for every block or floor a miner breaks. It returns a reward in lamports (0 for none).
 function createWorld(hooks) {
   const grid = new Uint8Array(NN), dmg = new Uint8Array(NN), fgrid = new Uint8Array(NN), fdmg = new Uint8Array(NN);
   const claim = new Uint8Array(2 * NN);          // wall targets use g, floor targets use NN + g; value is slot + 1
-  const openByLevel = [[], [], [], []];
+  const openByLevel = Array.from({ length: LV }, () => []);
   let spawn = [];
   const miners = new Map();                      // slot -> miner
   let outbox = [], regenT = 0, worldDirty = false;
@@ -77,7 +104,14 @@ function createWorld(hooks) {
   function genWorld() {
     claim.fill(0);
     for (let l = 0; l < LV; l++) {
-      const open = genCave(), base = l * N, thr = Math.max(2, 4 - l);
+      const inside = footprint(l), base = l * N, thr = Math.max(2, 4 - l);
+      const interior = new Uint8Array(N);
+      let count = 0;
+      for (let z = 1; z < Z - 1; z++) for (let x = 1; x < X - 1; x++) {
+        const i = z * X + x;
+        if (inside[i] && inside[i - 1] && inside[i + 1] && inside[i - X] && inside[i + X]) { interior[i] = 1; count++; }
+      }
+      const open = genCave(interior, count, FILL[l % FILL.length], ITERS[l % ITERS.length]);
       const dist = new Int16Array(N).fill(-1), q = new Int32Array(N);
       let qh = 0, qt = 0;
       openByLevel[l] = [];
@@ -88,15 +122,15 @@ function createWorld(hooks) {
         for (let d = 0; d < 4; d++) { const n2 = nb[d]; if (n2 >= 0 && dist[n2] < 0) { dist[n2] = dist[c] + 1; q[qt++] = n2; } }
       }
       for (let i = 0; i < N; i++) {
-        const x = i % X, z = (i / X) | 0, g = base + i;
-        const edge = x === 0 || z === 0 || x === X - 1 || z === Z - 1;
+        const g = base + i;
         let t;
-        if (open[i]) t = 0;
-        else if (edge) t = 5;
+        if (!inside[i]) t = VOID;
+        else if (open[i]) t = 0;
+        else if (!interior[i]) t = 5;
         else if (dist[i] >= thr) t = 2;
-        else t = Math.random() < 0.16 + 0.03 * l ? 3 : 1;
+        else t = Math.random() < Math.min(0.4, 0.16 + 0.03 * l) ? 3 : 1;
         grid[g] = t; dmg[g] = 0;
-        fgrid[g] = l === LV - 1 ? 2 : 1; fdmg[g] = 0;
+        fgrid[g] = (l === LV - 1 || t === VOID) ? 2 : 1; fdmg[g] = 0;
       }
     }
     const cand = shuffle(openByLevel[0].slice()), picks = [];
@@ -158,7 +192,7 @@ function createWorld(hooks) {
         const ng = l * N + nz * X + nx;
         if (grid[ng] === 0) {
           if (dist[ng] < 0) { dist[ng] = dist[cur] + 1; par[ng] = cur; q[qt++] = ng; }
-        } else if (grid[ng] !== 5) {
+        } else if (grid[ng] !== 5 && grid[ng] !== VOID) {
           anyWall = true;
           if (!claim[ng]) walls.push(ng, cur);
         }
@@ -166,7 +200,7 @@ function createWorld(hooks) {
       if (l < LV - 1) {
         if (fgrid[cur] === 0 && grid[cur + N] === 0) {
           if (dist[cur + N] < 0) { dist[cur + N] = dist[cur] + 1; par[cur + N] = cur; q[qt++] = cur + N; }
-        } else if (fgrid[cur] === 1) {
+        } else if (fgrid[cur] === 1 && grid[cur + N] !== VOID && grid[cur + N] !== 5) {
           anyFloor = true;
           if (!claim[NN + cur]) floorsC.push(NN + cur, cur);
         }
@@ -293,6 +327,7 @@ function createWorld(hooks) {
       if (regenT <= 0) {
         genWorld();
         miners.forEach(resetMiner);
+        if (hooks.onRegen) hooks.onRegen();
         stats.regens++;
         worldDirty = true;
       }
@@ -303,7 +338,7 @@ function createWorld(hooks) {
 
   const b64 = (a) => Buffer.from(a.buffer, a.byteOffset, a.byteLength).toString('base64');
   function worldMsg() {
-    return { t: 'world', grid: b64(grid), dmg: b64(dmg), fgrid: b64(fgrid), fdmg: b64(fdmg), spawn };
+    return { t: 'world', dims: [X, Z, LV], grid: b64(grid), dmg: b64(dmg), fgrid: b64(fgrid), fdmg: b64(fdmg), spawn };
   }
   function minersSnap() {
     const out = [];
@@ -313,8 +348,18 @@ function createWorld(hooks) {
   function flush() { const ev = outbox; outbox = []; return ev; }
   function takeWorldDirty() { const d = worldDirty; worldDirty = false; return d; }
 
+  // Random hidden-reward spots among blocks and floors that can really be dug. Floors are keyed NN + g.
+  function pickRewardCells(n) {
+    const cands = [];
+    for (let g = 0; g < NN; g++) { const t = grid[g]; if (t >= 1 && t <= 3) cands.push(g); }
+    for (let g = 0; g < NN - N; g++) if (fgrid[g] === 1 && grid[g] !== VOID && grid[g + N] !== VOID && grid[g + N] !== 5) cands.push(NN + g);
+    n = Math.min(n, cands.length);
+    for (let i = 0; i < n; i++) { const j = i + ((Math.random() * (cands.length - i)) | 0); const t = cands[i]; cands[i] = cands[j]; cands[j] = t; }
+    return cands.slice(0, n);
+  }
+
   genWorld();
-  return { miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
+  return { pickRewardCells, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
 }
 
-module.exports = { createWorld, SLOTS };
+module.exports = { createWorld, SLOTS, NN, N };

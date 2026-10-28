@@ -1,12 +1,12 @@
 # Bedrock Bots (devnet test)
 
-A 3D mining game. Your miner digs through a four-level cave, and hidden blocks pay real **devnet** SOL
+A 3D mining game. Your miner digs through an eight-level cave, each level with its own irregular outline,, and hidden blocks pay real **devnet** SOL
 from a throwaway wallet to the Phantom wallet you connect. Devnet SOL has no value.
 
 How it works:
 - `server.js` holds a throwaway keypair in `reward-wallet.json` (git-ignored), decides every reward, and sends it with a normal SOL transfer.
 - The page only reads your public address from Phantom. It never asks you to sign anything.
-- The pool (default 0.5 SOL) is split into up to 60 hidden rewards. The server picks which digs pay, so the browser cannot forge a reward.
+- The pool (default 0.5 SOL) is split into up to 60 rewards, each hidden inside one specific block or floor. Deeper spots hold bigger shares. The server knows where they are and the browser does not, so nobody can forge a reward.
 - The server refuses to run against anything but devnet and listens on 127.0.0.1 only.
 
 ## Run it (Windows, PowerShell)
@@ -30,7 +30,7 @@ npm start
 The server runs the cave and every miner (`world.js`) and streams the state to every browser, so everyone sees the same mine, the same miners and the same blocks breaking at the same place and time.
 
 - Opening the page without connecting lets you watch the live mine. Connecting a wallet adds your miner (up to 4 at once, one per wallet).
-- The server decides which digs pay, so the pool is shared: whichever miner breaks the winning block gets that reward.
+- The pool is shared: whichever miner breaks a block that holds a reward gets it. A lone miner takes a long time to find them all, and more miners find them faster. If the whole mine is dug out it rebuilds, and the unfound rewards are hidden again in the new cave.
 - Miners are removed a few seconds after their tab closes, or when you press Leave.
 - Open a second browser profile with another Phantom wallet to watch two miners in the same cave.
 
@@ -52,6 +52,7 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 
 | Name | Default | Meaning |
 | --- | --- | --- |
+| `REWARDS` | `60` | How many hidden rewards the pool is split into. Fewer rewards means bigger ones and a longer search |
 | `POOL_SOL` | `0.5` | Size of the reward pool, capped by the wallet balance minus a small reserve |
 | `MAX_MINERS` | `12` | Most miners in the mine at once (1 to 16) |
 | `PORT` | `3000` | Local port |
@@ -61,4 +62,4 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 
 - Never put real funds in `reward-wallet.json`. It is an unencrypted key file.
 - Restarting the server builds a fresh pool from the current balance.
-- Rewards are only paid for digs the server itself counts, so the browser cannot ask for one.
+- Rewards are only paid when the server itself sees a miner break the block that holds one, so the browser cannot ask for one.

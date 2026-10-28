@@ -163,8 +163,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   <div class="stage">
     <section class="sandbox" aria-label="Coal mine">
       <div class="view" id="view">
-        <canvas id="world" tabindex="0" aria-label="3D view of a four-level coal mine with miners digging into the walls and down through the floor. Drag to rotate, shift-drag or right-drag to pan, scroll or pinch to zoom. Arrow keys rotate, plus and minus zoom."></canvas>
-        <div class="lvl" id="lvlTag">Level 1 of 4</div>
+        <canvas id="world" tabindex="0" aria-label="3D view of an eight-level coal mine with miners digging into the walls and down through the floor. Drag to rotate, shift-drag or right-drag to pan, scroll or pinch to zoom. Arrow keys rotate, plus and minus zoom."></canvas>
+        <div class="lvl" id="lvlTag">Level 1 of 8</div>
         <div class="hint">Click a name tag to follow &middot; Drag to rotate &middot; Shift-drag or two fingers to pan &middot; Scroll or pinch to zoom</div>
         <div class="chatbox" id="chatCard" hidden>
           <div class="chathead">
@@ -251,6 +251,10 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <button class="btn btn-ghost btn-sm" type="button" data-lv="1" aria-pressed="false">2</button>
           <button class="btn btn-ghost btn-sm" type="button" data-lv="2" aria-pressed="false">3</button>
           <button class="btn btn-ghost btn-sm" type="button" data-lv="3" aria-pressed="false">4</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="4" aria-pressed="false">5</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="5" aria-pressed="false">6</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="6" aria-pressed="false">7</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="7" aria-pressed="false">8</button>
         </div>
         <div class="unit">Levels above the one you view are cut away. Deeper levels hold bigger rewards.</div>
       </div>
@@ -292,7 +296,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
 
   // The mine: LV stacked levels, each X by Z cells. Wall cells are tall rock pillars (height PH) standing on a floor slab (thickness FT).
   // Digging a floor slab opens a shaft down to the next level.
-  var X = 36, Z = 26, N = X * Z, LV = 4, NN = LV * N, PH = 2.0, FT = 1.0, LH = PH + FT;
+  var X = 48, Z = 34, N = X * Z, LV = 8, NN = LV * N, PH = 2.0, FT = 1.0, LH = PH + FT;
   var HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
   // The pool is split into this many hidden reward blocks across all levels. Amounts are in cents.
   var POOL_TOTAL = 1000, REWARD_BLOCKS = 60;
@@ -300,7 +304,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   var HARD = [0, 3, 4, 2, 0, 999];
   var NAMES = ['', 'Rock', 'Deep rock', 'Coal', '', 'Edge rock'];
   var SLOTS = 4, SIM_HUES = [24, 160, 300], SIM_NAMES = ['Sim A', 'Sim B', 'Sim C'];
-  var FOV = 42, LANTERN_LEVELS = [0, 0, 1, 1, 2, 3, 3];
+  var FOV = 42, LANTERN_PER_LEVEL = 2, LANTERN_LIGHTS = 8, VOID = 6;
 
   function $(id) { return document.getElementById(id); }
   var canvas = $('world'), view = $('view');
@@ -391,7 +395,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   var ys = new Float32Array(NN).fill(1);
   var fgrid = new Uint8Array(NN), fdmg = new Uint8Array(NN), frew = new Int32Array(NN);   // floor slabs: 1 intact, 0 dug out, 2 unbreakable
   var claim = new Uint8Array(2 * NN);   // wall targets use g, floor targets use NN + g
-  var openByLevel = [[], [], [], []], spawnCells = [0, 0, 0, 0];
+  var openByLevel = [], spawnCells = [0, 0, 0, 0];
+  for (var obl = 0; obl < LV; obl++) openByLevel.push([]);
 
   var pillarGeo = new THREE.BoxGeometry(1, PH, 1), floorGeo = new THREE.BoxGeometry(1, FT, 1);
   var pillarMats = {}, pillars = [], floors = [];
@@ -416,11 +421,12 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Cavern roof: faces down, so it is invisible from above and shows only when you look up from inside a level.
   var ceilings = [], stalac = [], stalGeo = new THREE.ConeGeometry(0.2, 0.8, 5), stalMat = mat(2, 1, 1);
   stalGeo.rotateX(Math.PI);
+  var tileGeo = new THREE.PlaneGeometry(1, 1), tileMat = mat(2, 1, 1);
+  tileGeo.rotateX(Math.PI / 2);
   (function () {
     for (var l = 0; l < LV; l++) {
-      var cg = new THREE.PlaneGeometry(X, Z); cg.rotateX(Math.PI / 2);
-      var c = new THREE.Mesh(cg, mat(2, X / 2, Z / 2));
-      c.position.set(0, baseY(l) + PH - 0.02, 0); scene.add(c); ceilings.push(c);
+      var c = new THREE.InstancedMesh(tileGeo, tileMat, N);
+      c.frustumCulled = false; c.count = 0; scene.add(c); ceilings.push(c);
       var sm = new THREE.InstancedMesh(stalGeo, stalMat, 24);
       sm.frustumCulled = false; sm.count = 0; scene.add(sm); stalac.push(sm);
     }
@@ -513,22 +519,24 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
 
   /* ---------- decor: lanterns and timber supports ---------- */
-  var lanterns = [];
-  for (var lk = 0; lk < LANTERN_LEVELS.length; lk++) {
+  var lanterns = [], lanternLights = [];
+  for (var lk = 0; lk < LV * LANTERN_PER_LEVEL; lk++) {
     var lg = new THREE.Group();
     var lpost = box(0.1, 0.9, 0.1, new THREE.MeshLambertMaterial({ color: 0x4a3320 })); lpost.position.y = 0.45; lg.add(lpost);
     var lamp = box(0.2, 0.24, 0.2, new THREE.MeshBasicMaterial({ color: 0xFFB45A })); lamp.position.y = 1.0; lg.add(lamp);
-    var lL = new THREE.PointLight(0xffa24a, 0, 10);
-    lg.visible = false; scene.add(lg); scene.add(lL);
-    lanterns.push({ g: lg, lamp: lamp, L: lL, on: false, level: LANTERN_LEVELS[lk] });
+    lg.visible = false; scene.add(lg);
+    lanterns.push({ g: lg, lamp: lamp, on: false, level: (lk / LANTERN_PER_LEVEL) | 0, px: 0, py: 0, pz: 0 });
   }
+  // Point lights are costly and their number must stay fixed, so 8 are lent to the lanterns nearest the camera.
+  for (var ll = 0; ll < LANTERN_LIGHTS; ll++) { var lLt = new THREE.PointLight(0xffa24a, 0, 10); scene.add(lLt); lanternLights.push(lLt); }
   var timberMat = new THREE.MeshLambertMaterial({ color: 0x5a3b22 });
   var postGeo = new THREE.BoxGeometry(0.14, 1.9, 0.14), beamGeo = new THREE.BoxGeometry(1.1, 0.16, 0.2);
   var supportsG = [];
   for (var sl = 0; sl < LV; sl++) { var sg = new THREE.Group(); scene.add(sg); supportsG.push(sg); }
   function isWallL(l, x, z) { return x < 0 || z < 0 || x >= X || z >= Z || grid[l * N + z * X + x] !== 0; }
   function placeDecor() {
-    var l, k, used = [[], [], [], []];
+    var l, k, used = [];
+    for (l = 0; l < LV; l++) used.push([]);
     lanterns.forEach(function (ln) {
       var lv = ln.level, cand = shuffle(openByLevel[lv].slice()), placed = false;
       for (k = 0; k < cand.length; k++) {
@@ -540,7 +548,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         if (!far) continue;
         used[lv].push({ x: x, z: z });
         var px = x - X / 2 + 0.5 + DIRS[wd][0] * 0.36, pz = z - Z / 2 + 0.5 + DIRS[wd][1] * 0.36;
-        ln.g.position.set(px, baseY(lv), pz); ln.L.position.set(px, baseY(lv) + 1.15, pz);
+        ln.g.position.set(px, baseY(lv), pz); ln.px = px; ln.py = baseY(lv) + 1.15; ln.pz = pz;
         placed = true; break;
       }
       ln.on = placed;
@@ -572,6 +580,20 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         else { beam.rotation.y = Math.PI / 2; pa.position.set(bx, by + 0.95, bz - 0.42); pb.position.set(bx, by + 0.95, bz + 0.42); }
         sg2.add(beam); sg2.add(pa); sg2.add(pb);
       }
+    }
+  }
+
+  // One roof tile per cell that is inside a level's outline.
+  function buildCeilings() {
+    for (var l = 0; l < LV; l++) {
+      var n = 0;
+      for (var i = 0; i < N; i++) {
+        var g = l * N + i;
+        if (grid[g] === VOID) continue;
+        vPos.set(wxg(g), baseY(l) + PH - 0.02, wzg(g)); vScale.set(1, 1, 1);
+        mtx.compose(vPos, qId, vScale); ceilings[l].setMatrixAt(n++, mtx);
+      }
+      ceilings[l].count = n; ceilings[l].instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -618,6 +640,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     for (i = 0; picks.length < SLOTS; i++) picks.push(cand[i % cand.length]);
     spawnCells = picks;
     placeDecor();
+    buildCeilings();
     updatePool();
     lastFocus = -1;
   }
@@ -707,7 +730,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
 
   /* ---------- camera: full orbit around a target, pan, zoom, follow and chase ---------- */
-  var DEF = { theta: 0.35, phi: 0.95, r: 26 };
+  var DEF = { theta: 0.35, phi: 0.95, r: 30 };
   var cam = { theta: DEF.theta, phi: DEF.phi, r: DEF.r, tx: 0, ty: 0.8, tz: 0, follow: true, chase: false };
   function placeCamera() {
     var sp = Math.sin(cam.phi), cp = Math.cos(cam.phi);
@@ -762,7 +785,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       var a = ptrs[keys[0]], b = ptrs[keys[1]];
       var d = Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
       var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      if (lastPinch && d > 0) cam.r = clamp(cam.r * lastPinch / d, 10, 55);
+      if (lastPinch && d > 0) cam.r = clamp(cam.r * lastPinch / d, 10, 75);
       if (lastMid) panBy(mid.x - lastMid.x, mid.y - lastMid.y);
       lastPinch = d; lastMid = mid;
     }
@@ -770,15 +793,15 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function endPtr(e) { delete ptrs[e.pointerId]; lastPinch = 0; lastMid = null; }
   canvas.addEventListener('pointerup', endPtr);
   canvas.addEventListener('pointercancel', endPtr);
-  canvas.addEventListener('wheel', function (e) { e.preventDefault(); cam.r = clamp(cam.r * Math.exp(e.deltaY * 0.0012), 10, 55); }, { passive: false });
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); cam.r = clamp(cam.r * Math.exp(e.deltaY * 0.0012), 10, 75); }, { passive: false });
   canvas.addEventListener('keydown', function (e) {
     var k = e.key, used = true, step = e.shiftKey;
     if (k === 'ArrowLeft') { if (step) panBy(40, 0); else rotateBy(-30, 0); }
     else if (k === 'ArrowRight') { if (step) panBy(-40, 0); else rotateBy(30, 0); }
     else if (k === 'ArrowUp') { if (step) panBy(0, 40); else rotateBy(0, 20); }
     else if (k === 'ArrowDown') { if (step) panBy(0, -40); else rotateBy(0, -20); }
-    else if (k === '+' || k === '=') cam.r = clamp(cam.r * 0.9, 10, 55);
-    else if (k === '-') cam.r = clamp(cam.r * 1.1, 10, 55);
+    else if (k === '+' || k === '=') cam.r = clamp(cam.r * 0.9, 10, 75);
+    else if (k === '-') cam.r = clamp(cam.r * 1.1, 10, 75);
     else used = false;
     if (used) e.preventDefault();
   });
@@ -1051,6 +1074,10 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // The server runs the mine and every miner. This page loads its world, then applies each change it streams.
   function unb64(str, arr) { var bin = atob(str); for (var i = 0; i < arr.length; i++) arr[i] = bin.charCodeAt(i); }
   function loadWorld(w) {
+    if (w.dims && (w.dims[0] !== X || w.dims[1] !== Z || w.dims[2] !== LV)) {
+      showMsg('This page and the server are different versions. Hard-refresh the page (Ctrl+Shift+R).', false); $('gate').hidden = false;
+      return;
+    }
     unb64(w.grid, grid); unb64(w.dmg, dmg); unb64(w.fgrid, fgrid); unb64(w.fdmg, fdmg);
     claim.fill(0); ys.fill(1); lowered = {}; rew.fill(0); frew.fill(0);
     var l, i, g;
@@ -1059,16 +1086,18 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       openByLevel[l] = [];
       for (i = 0; i < N; i++) {
         g = l * N + i; btype[g] = grid[g];
-        if (grid[g]) inst[g] = counts[grid[g]]++; else openByLevel[l].push(i);
+        if (grid[g] === VOID) btype[g] = 0;
+        else if (grid[g]) inst[g] = counts[grid[g]]++; else openByLevel[l].push(i);
       }
       [1, 2, 3, 5].forEach(function (tt) { pillars[l][tt].count = counts[tt]; });
     }
     for (g = 0; g < NN; g++) {
       if (btype[g]) { setBlock(g, 1, 1); shadeBlock(g); }
-      setFloor(g, fgrid[g] === 0 ? 0 : 1); shadeFloor(g);
+      setFloor(g, (fgrid[g] === 0 || grid[g] === VOID) ? 0 : 1); shadeFloor(g);
     }
     spawnCells = w.spawn;
     placeDecor();
+    buildCeilings();
     lastFocus = -1;
   }
   function connectStream() {
@@ -1391,7 +1420,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         var nx = px + dx, nz = pz + dz;
         if (nx < 0 || nz < 0 || nx >= X || nz >= Z) continue;
         g = lb.level * N + nz * X + nx;
-        if (grid[g] !== 0 && g !== lb.target) want[g] = true;
+        if (grid[g] !== 0 && btype[g] !== 0 && g !== lb.target) want[g] = true;
       }
     }
     for (key in want) lowered[key] = true;
@@ -1408,10 +1437,18 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function update(dt) {
     t += dt;
     stepParticles(dt);
+    var lit = [];
     for (var k = 0; k < lanterns.length; k++) {
-      var ln = lanterns[k], lit = ln.on && ln.level >= focus;
-      ln.L.intensity = lit ? 1.15 + 0.2 * Math.sin(t * 11 + k * 1.9) + 0.12 * Math.sin(t * 27 + k * 2.3) : 0;
+      var ln = lanterns[k];
       ln.lamp.scale.y = 0.92 + 0.12 * Math.sin(t * 15 + k);
+      if (ln.on && ln.level >= focus) lit.push(ln);
+    }
+    lit.sort(function (a, b) {
+      return (Math.pow(a.px - cam.tx, 2) + Math.pow(a.py - cam.ty, 2) + Math.pow(a.pz - cam.tz, 2)) - (Math.pow(b.px - cam.tx, 2) + Math.pow(b.py - cam.ty, 2) + Math.pow(b.pz - cam.tz, 2));
+    });
+    for (var li2 = 0; li2 < lanternLights.length; li2++) {
+      var LL = lanternLights[li2], lc = lit[li2];
+      if (lc) { LL.position.set(lc.px, lc.py, lc.pz); LL.intensity = 1.15 + 0.2 * Math.sin(t * 11 + li2 * 1.9) + 0.12 * Math.sin(t * 27 + li2 * 2.3); } else LL.intensity = 0;
     }
     if (DEV) { netStep(dt); return; }
     var sdt = dt * speedMult;
