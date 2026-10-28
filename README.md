@@ -88,7 +88,7 @@ node sweep.js --to <your address> --keep 0.05 --yes
 
 ## Top-ups (fees flowing into the pool)
 
-Every 15 seconds the server checks the reward wallet. Whatever arrived since the pool was built (creator fees, a manual transfer) becomes new hidden rewards once it adds up to `TOPUP_MIN_SOL` (default 0.01 SOL). New rewards go on levels that are not cleared yet, so they extend the level gating. Anything above `POOL_SOL` when the pool was first built is left alone. In a dry run you can pretend: `curl -X POST localhost:3000/api/dry-fund -H "origin: http://127.0.0.1:3000" -H "content-type: application/json" -d "{\"sol\":0.05}"`.
+Every 30 seconds the server checks the reward wallet. Whatever arrived since the pool was built (creator fees, a manual transfer) becomes new hidden rewards once it adds up to `TOPUP_MIN_SOL` (default 0.01 SOL). New rewards go on levels that are not cleared yet, so they extend the level gating. Anything above `POOL_SOL` when the pool was first built is left alone. In a dry run you can pretend: `curl -X POST localhost:3000/api/dry-fund -H "origin: http://127.0.0.1:3000" -H "content-type: application/json" -d "{\"sol\":0.05}"`.
 
 ## Admin access
 
@@ -132,11 +132,11 @@ Rewards can be paid in an SPL token instead of SOL, and mining can require holdi
 | `MIN_REWARD_TOKENS` | Smallest single reward (default 1) |
 | `MAX_WALLET_PAYOUT` | Most tokens one wallet can win per 24 hours (`0` = no cap) |
 | `TOPUP_MIN_TOKENS` | Tokens that must arrive before a top-up (default 10x the smallest reward) |
-| `HOLD_RECHECK_MS` | How often holders are re-checked (default 60000) |
+| `HOLD_RECHECK_MS` | How often holders are re-checked (default 120000) |
 
 With `MIN_HOLD` set:
 - Players can **paste a wallet address** (nothing to connect) or **connect Phantom and sign a free message** (proof they own it, never a transaction). Either way the server checks the balance; below the minimum, no miner is sent in and the page says how much is needed. Rewards are paid to the address, so pasting someone else's address only sends them tokens. A pasted address shows as unverified in chat, and someone else cannot kick it out: a second device must connect and sign to take over. Set `REQUIRE_SIGNATURE=1` to turn pasting off and require a signature from everyone.
-- Every minute the server checks holders again; a wallet that sold below the minimum is removed from the mine.
+- Every 2 minutes the server checks holders again; a wallet that sold below the minimum is removed from the mine.
 - Right before a payout it checks once more. If the balance dropped, the reward goes back into the mine.
 - Both the classic Token program and Token-2022 mints work (detected from the mint).
 
@@ -162,3 +162,7 @@ More miners finds rewards much faster. Simulated time for the miners together to
 By default (`AUTO_SCALE=1`) blocks get harder as more miners join, so a crowd of 50 does not drain the pool far faster than a crowd of 6. The multiplier is your difficulty's `HARD_MULT` times `miners / REF_MINERS` (never below the base), re-checked every few seconds in steps of 0.25 and capped at `HARD_CAP` (default 30). `REF_MINERS` defaults to 6: with 12 miners blocks take twice the hits, with 50 miners about 8 times. The left panel shows the current figure.
 
 Simulated time to clear level 1 on `easy`: 6 miners about 2 minutes, 50 miners about 2 minutes (without scaling: about 1). To make everything slower, raise `DIFFICULTY` or `HARD_MULT`, or lower `REF_MINERS` (for example 3 doubles the hardness at any crowd size). `AUTO_SCALE=0` switches it off.
+
+## RPC usage
+
+The server makes a handful of RPC calls: a holder check when someone joins and every `HOLD_RECHECK_MS` per miner, a pool balance check every `TOPUP_EVERY_MS`, cached balance lookups for the page (20 seconds), and the payout transactions. With 12 miners online around the clock that is roughly 0.5 million calls a month, so a free plan from an RPC provider (for example 1 million credits a month) is enough for a small group. The public Solana endpoints are rate limited and not meant for this. Use a provider URL in `RPC_URL`, and make sure it allows WebSocket connections (payout confirmation uses one).

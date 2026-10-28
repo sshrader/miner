@@ -138,7 +138,7 @@ let balanceCache = { at: 0, v: null };
 // What the pool is made of: lamports in SOL mode, token base units in token mode.
 async function getBalance(force) {
   if (DRY_RUN) return (TOKEN_MODE ? Math.round((Number(process.env.POOL_TOKENS) || 1000) * UI()) : Math.round(POOL_SOL * LAMPORTS_PER_SOL) + RESERVE) + dryExtra;
-  if (!force && Date.now() - balanceCache.at < 8000) return balanceCache.v;
+  if (!force && Date.now() - balanceCache.at < 20000) return balanceCache.v;
   try {
     let v;
     if (TOKEN_MODE) {
@@ -153,7 +153,7 @@ async function getBalance(force) {
 // SOL in the reward wallet (token mode needs it for fees and for new recipients' token accounts).
 async function getSol(force) {
   if (DRY_RUN) return 1 * LAMPORTS_PER_SOL;
-  if (!force && Date.now() - solCache.at < 8000) return solCache.v;
+  if (!force && Date.now() - solCache.at < 20000) return solCache.v;
   try { solCache = { at: Date.now(), v: await connection.getBalance(payer.publicKey, 'confirmed') }; } catch (e) { solCache = { at: Date.now(), v: null }; }
   return solCache.v;
 }
@@ -711,8 +711,8 @@ const server = http.createServer(async (req, res) => {
       sess.hold = now; sess.holdAt = Date.now();
       if (now < MIN_HOLD) kick(sid, 'Removed from the mine: your ' + TOKEN_SYMBOL + ' balance is below the minimum.');
     }
-  }, Number(process.env.HOLD_RECHECK_MS) || 60000);
-  setInterval(() => { topUp().catch((e) => console.error('Top-up check failed: ' + e.message)); }, Number(process.env.TOPUP_EVERY_MS) || 15000);
+  }, Number(process.env.HOLD_RECHECK_MS) || 120000);
+  setInterval(() => { topUp().catch((e) => console.error('Top-up check failed: ' + e.message)); }, Number(process.env.TOPUP_EVERY_MS) || 30000);
   server.listen(PORT, HOST, () => {
     if (HOST !== '127.0.0.1' && !MAX_PER_IP) console.log('WARNING: the server is reachable from outside but MAX_PER_IP is not set.');
     console.log('');
