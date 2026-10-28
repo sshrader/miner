@@ -40,6 +40,12 @@ if (process.env.SEASON_END && !SEASON_END) { console.error('SEASON_END must be a
 const seasonOver = () => SEASON_END > 0 && Date.now() >= SEASON_END;
 const MIN_REWARD = 1000000;               // 0.001 SOL; also clears the rent minimum for a brand-new recipient account
 const RESERVE = 2000000 + MAX_REWARDS * 5000; // keep rent minimum + fees in the reward wallet
+// Admin actions (New pool, dry-run funding) need this key. Set ADMIN_KEY yourself, or a new random one is made each start.
+const ADMIN_KEY = process.env.ADMIN_KEY || crypto.randomBytes(18).toString('hex');
+function isAdmin(req) {
+  const got = Buffer.from(String(req.headers['x-admin-key'] || '')), want = Buffer.from(ADMIN_KEY);
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
+}
 const WALLET_FILE = path.join(__dirname, 'reward-wallet.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -363,6 +369,8 @@ const server = http.createServer(async (req, res) => {
       sess.verified = true; sess.challenge = null;
       return send(res, 200, { verified: true });
     }
+    if (url.pathname === '/api/admin-check' && req.method === 'POST') return send(res, isAdmin(req) ? 200 : 403, { admin: isAdmin(req) });
+    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/reset-pool') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
     if (url.pathname === '/api/dry-fund' && req.method === 'POST' && DRY_RUN) {
       const body = await readBody(req);
       dryExtra += Math.round((Number(body.sol) || 0) * LAMPORTS_PER_SOL);
@@ -413,6 +421,7 @@ const server = http.createServer(async (req, res) => {
   server.listen(PORT, '127.0.0.1', () => {
     console.log('');
     console.log('Bedrock Bots (devnet) running at http://127.0.0.1:' + PORT);
+    console.log('Admin link (keep private): http://127.0.0.1:' + PORT + '/#admin=' + ADMIN_KEY);
     console.log('Reward wallet (send DEVNET SOL here): ' + payer.publicKey.toBase58());
     if (pool.total === 0) console.log('The wallet needs devnet SOL. Fund it at https://faucet.solana.com (network: devnet), then click "New pool" in the page.');
   });
