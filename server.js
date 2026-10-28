@@ -110,6 +110,7 @@ async function state() {
     rewardsLeft: pool.rewards.size + pool.retry.length,
     needsFunding: pool.total === 0,
     miners: world.miners.size,
+    maxMiners: SLOTS,
     explorer
   };
 }

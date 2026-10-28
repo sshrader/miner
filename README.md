@@ -53,6 +53,7 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 | Name | Default | Meaning |
 | --- | --- | --- |
 | `POOL_SOL` | `0.5` | Size of the reward pool, capped by the wallet balance minus a small reserve |
+| `MAX_MINERS` | `12` | Most miners in the mine at once (1 to 16) |
 | `PORT` | `3000` | Local port |
 | `RPC_URL` | public devnet RPC | Use your own devnet RPC if you get rate-limited. Mainnet URLs are refused. |
 

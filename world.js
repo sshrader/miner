@@ -3,7 +3,8 @@
 // Browsers only draw what this module reports, so everyone sees the same world in the same place.
 
 const X = 36, Z = 26, N = X * Z, LV = 4, NN = LV * N, PH = 2, FT = 1, LH = PH + FT;
-const HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3, SLOTS = 4;
+const HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
+const SLOTS = Math.max(1, Math.min(16, Number(process.env.MAX_MINERS) || 12));   // most miners in the mine at once
 const HARD = [0, 3, 4, 2, 0, 999];                 // hits to break: 1 rock, 2 deep rock, 3 coal, 5 edge rock
 const NAMES = ['', 'rock', 'deep rock', 'coal', '', 'edge rock'];
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -66,7 +67,7 @@ function createWorld(hooks) {
   const grid = new Uint8Array(NN), dmg = new Uint8Array(NN), fgrid = new Uint8Array(NN), fdmg = new Uint8Array(NN);
   const claim = new Uint8Array(2 * NN);          // wall targets use g, floor targets use NN + g; value is slot + 1
   const openByLevel = [[], [], [], []];
-  let spawn = [0, 0, 0, 0];
+  let spawn = [];
   const miners = new Map();                      // slot -> miner
   let outbox = [], regenT = 0, worldDirty = false;
   const stats = { blocks: 0, regens: 0 };
@@ -102,7 +103,7 @@ function createWorld(hooks) {
     for (let i = 0; i < cand.length && picks.length < SLOTS; i++) {
       let ok = true;
       for (let j = 0; j < picks.length; j++) {
-        if (Math.abs(picks[j] % X - cand[i] % X) + Math.abs(((picks[j] / X) | 0) - ((cand[i] / X) | 0)) < 5) { ok = false; break; }
+        if (Math.abs(picks[j] % X - cand[i] % X) + Math.abs(((picks[j] / X) | 0) - ((cand[i] / X) | 0)) < 3) { ok = false; break; }
       }
       if (ok) picks.push(cand[i]);
     }

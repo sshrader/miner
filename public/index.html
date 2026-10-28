@@ -83,7 +83,7 @@ canvas:active { cursor: grabbing; }
 .hint, .lvl { position: absolute; font: 500 12px var(--font-mono); color: #E9E5F2; background: rgba(8, 7, 12, 0.72); padding: 5px 10px; border-radius: 999px; pointer-events: none; max-width: calc(100% - 20px); }
 .hint { left: 10px; bottom: 10px; }
 .lvl { left: 10px; top: 10px; color: var(--gold); font-weight: 500; }
-.pop { position: absolute; transform: translate(-50%, -50%); pointer-events: none; font: 700 22px var(--font-display); color: #FFD25A; text-shadow: 0 2px 0 #1A1405, 2px 0 0 #1A1405, -2px 0 0 #1A1405, 0 -2px 0 #1A1405; animation: rise 1.7s ease-out forwards; white-space: nowrap; }
+.pop { position: absolute; transform: translate(-50%, -50%); pointer-events: none; font: 700 22px var(--font-body); color: #FFD25A; text-shadow: 0 2px 0 #1A1405, 2px 0 0 #1A1405, -2px 0 0 #1A1405, 0 -2px 0 #1A1405; animation: rise 1.7s ease-out forwards; white-space: nowrap; }
 .pop.sim { font-size: 16px; color: #E8C98E; }
 @keyframes rise { 0% { opacity: 0; transform: translate(-50%, -30%) scale(0.7); } 12% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -260%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
@@ -113,15 +113,15 @@ canvas:active { cursor: grabbing; }
 .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .name { font: 700 17px/1.1 var(--font-display); }
 .status { font: 500 13px var(--font-mono); color: var(--muted); }
-.fees { font: 700 34px/1 var(--font-display); color: var(--gold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.fees { font: 700 32px/1 var(--font-body); color: var(--gold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .unit { font: 500 13px var(--font-mono); color: var(--muted); }
-.pool { font: 700 26px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.pool { font: 700 26px/1 var(--font-body); font-variant-numeric: tabular-nums; }
 .bar { height: 10px; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
 .bar i { display: block; height: 100%; width: 100%; background: var(--ember); transition: width 0.4s ease; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
 .stats div { min-width: 0; }
 .stats dt { font: 500 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.stats dd { margin: 2px 0 0; font: 700 16px/1.1 var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.stats dd { margin: 2px 0 0; font: 700 16px/1.1 var(--font-body); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .miners { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -649,12 +649,14 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     var arm = box(0.09, 0.09, 0.3, cloth); arm.position.z = 0.12; swingG.add(arm);
     var stick = box(0.06, 0.06, 0.62, new THREE.MeshLambertMaterial({ color: 0x8B5A2B })); stick.position.z = 0.34; swingG.add(stick);
     var pick = box(0.36, 0.07, 0.07, new THREE.MeshLambertMaterial({ color: 0x9CA2AE })); pick.position.z = 0.66; swingG.add(pick);
-    var light = new THREE.PointLight(0xfff0c8, 0, 8);
-    g.visible = false; scene.add(g); scene.add(light);
-    return { g: g, body: body, legL: legL, legR: legR, armL: armL, tool: tool, swingG: swingG, cloth: cloth, light: light };
+    g.visible = false; scene.add(g);
+    return { g: g, body: body, legL: legL, legR: legR, armL: armL, tool: tool, swingG: swingG, cloth: cloth };
   }
   var rigs = [];
-  for (var rk = 0; rk < SLOTS; rk++) rigs.push(makeRig());
+  for (var rk = 0; rk < 16; rk++) rigs.push(makeRig());
+  // Lights are expensive and their number must stay fixed, so 4 headlamps are lent to the miners nearest the camera.
+  var headLights = [];
+  for (var hl = 0; hl < 4; hl++) { var hlL = new THREE.PointLight(0xfff0c8, 0, 8); scene.add(hlL); headLights.push(hlL); }
   var marker = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.43, 28), new THREE.MeshBasicMaterial({ color: 0xA394FF, side: THREE.DoubleSide }));
   marker.rotation.x = -Math.PI / 2; marker.visible = false; scene.add(marker);
   var flash = new THREE.PointLight(0xffd25a, 0, 9); scene.add(flash);
@@ -915,7 +917,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function releaseClaim(b) { if (b.target >= 0 && claim[b.target] === b.id + 1) claim[b.target] = 0; b.target = -1; b.dig = false; }
   function removeBot(b) {
     releaseClaim(b);
-    b.rig.g.visible = false; b.rig.light.intensity = 0;
+    b.rig.g.visible = false;
     if (b.tag && b.tag.parentNode) b.tag.parentNode.removeChild(b.tag);
     if (b.bub && b.bub.parentNode) b.bub.parentNode.removeChild(b.bub);
     if (followBot === b) followBot = player;
@@ -1025,7 +1027,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('demoBtn').hidden = true;
     $('gateTxt').textContent = 'You are watching the live mine. Connect Phantom to send your own miner in. Every wallet shares this one cave.';
     $('speed1').hidden = true; $('speed3').hidden = true; $('addSim').hidden = true; $('clearSims').hidden = true;
-    $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to 4 miners at once.';
+    $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to ' + s.maxMiners + ' miners at once.';
     connectStream();
     setInterval(pingSession, 5000);
     $('poolLbl').textContent = 'Reward pool (devnet SOL)';
@@ -1497,8 +1499,6 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     var bob = b.moving ? Math.abs(Math.sin(b.walk * 9)) * 0.05 : 0;
     if (b.state === 'celebrate') bob = Math.abs(Math.sin(ph * 12)) * 0.22;
     r.g.position.set(b.pos.x, b.pos.y + bob, b.pos.z);
-    r.light.position.set(b.pos.x, b.pos.y + 1.25, b.pos.z);
-    r.light.intensity = vis ? 1.5 + (b.state === 'spawn' ? (1 - Math.min(1, b.t)) * 1.5 : 0) : 0;
     var diff = Math.atan2(Math.sin(b.yaw - r.body.rotation.y), Math.cos(b.yaw - r.body.rotation.y));
     r.body.rotation.y += diff * Math.min(1, dt * 12);
     var sw = b.moving ? Math.sin(b.walk * 9) * 0.7 : 0;
@@ -1520,6 +1520,14 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     update(dt);
     updateLowering(dt);
     for (var i = 0; i < bots.length; i++) syncBot(bots[i], dt);
+    var lamp = bots.filter(function (q) { return q.level >= focus; });
+    lamp.sort(function (p, q) {
+      return (Math.pow(p.pos.x - cam.tx, 2) + Math.pow(p.pos.y - cam.ty, 2) + Math.pow(p.pos.z - cam.tz, 2)) - (Math.pow(q.pos.x - cam.tx, 2) + Math.pow(q.pos.y - cam.ty, 2) + Math.pow(q.pos.z - cam.tz, 2));
+    });
+    for (var li = 0; li < headLights.length; li++) {
+      var hb = lamp[li], HL = headLights[li];
+      if (hb) { HL.position.set(hb.pos.x, hb.pos.y + 1.25, hb.pos.z); HL.intensity = 1.5 + (hb.state === 'spawn' ? (1 - Math.min(1, hb.t)) * 1.5 : 0); } else HL.intensity = 0;
+    }
     var fb = followBot || player;
     if (player) {
       marker.visible = player.level >= focus; marker.position.set(player.pos.x, player.pos.y + 0.03, player.pos.z);
