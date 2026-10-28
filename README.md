@@ -143,3 +143,7 @@ With `MIN_HOLD` set:
 Dry-run testing without a network: `DRY_RUN=1 DRY_TOKEN=1 MIN_HOLD=100 node server.js`, then give a wallet a fake balance with `POST /api/dry-holder {"address":"...","amount":500}` using your admin key header (`x-admin-key`).
 
 Sweep leftover tokens when the season is over: `$env:TOKEN_MINT="<mint>"; node sweep.js --to <address> --token`, then `node sweep.js --to <address>` for the SOL.
+
+## Deploy notes
+
+If a host builds with an old Node and crashes on start with `ERR_REQUIRE_ESM` (from `rpc-websockets` / `uuid`), the project now asks for Node 22 (`engines`, `.nvmrc`) and pins that package to a compatible version via `overrides`. On Railway you can also set the variable `NIXPACKS_NODE_VERSION=22`.
