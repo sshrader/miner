@@ -52,7 +52,9 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 
 | Name | Default | Meaning |
 | --- | --- | --- |
-| `REWARDS` | `60` | How many hidden rewards the pool is split into. Fewer rewards means bigger ones and a longer search |
+| `DIFFICULTY` | `easy` | `easy`, `normal`, `hard` or `brutal`. Sets rewards per level and how many hits blocks take |
+| `REWARDS_PER_LEVEL` | by difficulty (4 / 8 / 12 / 20) | Hidden rewards in each of the 8 levels |
+| `HARD_MULT` | by difficulty (1 / 1.5 / 3 / 6) | Multiplies the hits every block and floor takes |
 | `POOL_SOL` | `0.5` | Size of the reward pool, capped by the wallet balance minus a small reserve |
 | `MAX_MINERS` | `12` | Most miners in the mine at once (1 to 16) |
 | `PORT` | `3000` | Local port |
@@ -63,3 +65,8 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 - Never put real funds in `reward-wallet.json`. It is an unencrypted key file.
 - Restarting the server builds a fresh pool from the current balance.
 - Rewards are only paid when the server itself sees a miner break the block that holds one, so the browser cannot ask for one.
+
+
+## Level gating
+
+Miners cannot dig through a level's floor until **every reward hidden on that level has been found**. Level 1 opens first; finding its last reward unlocks level 2, and so on. Rewards only hide in walls (never floors), spread evenly over the 8 levels, with bigger shares deeper down. Simulated one-miner times to clear the whole mine: easy about 2 h, normal about 2 h, hard about 3 h, brutal about 4 h (more miners finish faster). Change `DIFFICULTY`, `REWARDS_PER_LEVEL` or `HARD_MULT` to tune it.

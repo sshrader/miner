@@ -90,7 +90,9 @@ const FILL = [0.55, 0.5, 0.56, 0.49, 0.55, 0.51, 0.56, 0.5];
 const ITERS = [4, 3, 4, 3, 4, 3, 4, 3];
 
 // hooks.onDig(miner, info) is called for every block or floor a miner breaks. It returns a reward in lamports (0 for none).
-function createWorld(hooks) {
+function createWorld(hooks, opts) {
+  const hardMult = (opts && opts.hardMult) || 1;   // multiplies how many hits every block and floor takes
+  const need = (type) => Math.ceil(HARD[type] * hardMult);
   const grid = new Uint8Array(NN), dmg = new Uint8Array(NN), fgrid = new Uint8Array(NN), fdmg = new Uint8Array(NN);
   const claim = new Uint8Array(2 * NN);          // wall targets use g, floor targets use NN + g; value is slot + 1
   const openByLevel = Array.from({ length: LV }, () => []);
@@ -172,6 +174,7 @@ function createWorld(hooks) {
     if (m.target >= 0 && claim[m.target] === m.id + 1) claim[m.target] = 0;
     m.target = -1; m.dig = false;
   }
+  let unlocked = LV - 1;   // deepest level miners may reach; floors of levels >= unlocked cannot be dug
   function startRegen() {
     if (regenT > 0) return;
     regenT = 1.4;
@@ -200,7 +203,7 @@ function createWorld(hooks) {
       if (l < LV - 1) {
         if (fgrid[cur] === 0 && grid[cur + N] === 0) {
           if (dist[cur + N] < 0) { dist[cur + N] = dist[cur] + 1; par[cur + N] = cur; q[qt++] = cur + N; }
-        } else if (fgrid[cur] === 1 && grid[cur + N] !== VOID && grid[cur + N] !== 5) {
+        } else if (fgrid[cur] === 1 && l < unlocked && grid[cur + N] !== VOID && grid[cur + N] !== 5) {
           anyFloor = true;
           if (!claim[NN + cur]) floorsC.push(NN + cur, cur);
         }
@@ -208,8 +211,13 @@ function createWorld(hooks) {
       if (l > 0 && fgrid[cur - N] === 0 && grid[cur - N] === 0 && dist[cur - N] < 0) { dist[cur - N] = dist[cur] + 1; par[cur - N] = cur; q[qt++] = cur - N; }
     }
     if (!anyWall && !anyFloor) { startRegen(); return; }
-    const useFloor = floorsC.length && (!walls.length || Math.random() < 0.26);
-    const list = useFloor ? floorsC : walls;
+    // Walls on the deepest unlocked level (or below) are where the work is; floors are only worth digging to reach it.
+    const live = [];
+    for (let i = 0; i < walls.length; i += 2) if (gl(walls[i]) >= unlocked) live.push(walls[i], walls[i + 1]);
+    let list, useFloor = false;
+    if (live.length) list = live;
+    else if (floorsC.length) { list = floorsC; useFloor = true; }
+    else list = walls;
     if (!list.length) { m.state = 'wait'; m.t = 0.4; m.moving = false; return; }
     const pickN = Math.min(useFloor ? 6 : 10, list.length / 2), pk = ((Math.random() * pickN) | 0) * 2;
     const target = list[pk], stand = list[pk + 1], path = [];
@@ -228,7 +236,7 @@ function createWorld(hooks) {
   function hitBlock(m, g) {
     dmg[g]++;
     emit({ e: 'hit', g, d: dmg[g], by: m.id });
-    if (dmg[g] >= HARD[grid[g]]) breakBlock(m, g);
+    if (dmg[g] >= need(grid[g])) breakBlock(m, g);
   }
   function breakBlock(m, g) {
     const type = grid[g], l = gl(g);
@@ -241,7 +249,7 @@ function createWorld(hooks) {
   function hitFloor(m, g) {
     fdmg[g]++;
     emit({ e: 'fhit', g, d: fdmg[g], by: m.id });
-    if (fdmg[g] >= FHARD) breakFloor(m, g);
+    if (fdmg[g] >= Math.ceil(FHARD * hardMult)) breakFloor(m, g);
   }
   // Breaking a floor opens a shaft: the cell below is carved out and the miner drops to the next level.
   function breakFloor(m, g) {
@@ -338,7 +346,7 @@ function createWorld(hooks) {
 
   const b64 = (a) => Buffer.from(a.buffer, a.byteOffset, a.byteLength).toString('base64');
   function worldMsg() {
-    return { t: 'world', dims: [X, Z, LV], grid: b64(grid), dmg: b64(dmg), fgrid: b64(fgrid), fdmg: b64(fdmg), spawn };
+    return { t: 'world', hm: hardMult, dims: [X, Z, LV], grid: b64(grid), dmg: b64(dmg), fgrid: b64(fgrid), fdmg: b64(fdmg), spawn };
   }
   function minersSnap() {
     const out = [];
@@ -349,17 +357,23 @@ function createWorld(hooks) {
   function takeWorldDirty() { const d = worldDirty; worldDirty = false; return d; }
 
   // Random hidden-reward spots among blocks and floors that can really be dug. Floors are keyed NN + g.
-  function pickRewardCells(n) {
-    const cands = [];
-    for (let g = 0; g < NN; g++) { const t = grid[g]; if (t >= 1 && t <= 3) cands.push(g); }
-    for (let g = 0; g < NN - N; g++) if (fgrid[g] === 1 && grid[g] !== VOID && grid[g + N] !== VOID && grid[g + N] !== 5) cands.push(NN + g);
-    n = Math.min(n, cands.length);
-    for (let i = 0; i < n; i++) { const j = i + ((Math.random() * (cands.length - i)) | 0); const t = cands[i]; cands[i] = cands[j]; cands[j] = t; }
-    return cands.slice(0, n);
+  // `counts[l]` = how many rewards to hide in the walls of level l. Floors never hold rewards: they are the gate to the next level.
+  function pickRewardCells(counts) {
+    const out = [];
+    for (let l = 0; l < LV; l++) {
+      const n = counts[l] | 0;
+      if (n <= 0) continue;
+      const cands = [];
+      for (let g = l * N; g < (l + 1) * N; g++) { const t = grid[g]; if (t >= 1 && t <= 3) cands.push(g); }
+      const k = Math.min(n, cands.length);
+      for (let i = 0; i < k; i++) { const j = i + ((Math.random() * (cands.length - i)) | 0); const t = cands[i]; cands[i] = cands[j]; cands[j] = t; out.push(cands[i]); }
+    }
+    return out;
   }
+  function setUnlocked(u) { unlocked = Math.max(0, Math.min(LV - 1, u | 0)); }
 
   genWorld();
-  return { pickRewardCells, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
+  return { pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
 }
 
 module.exports = { createWorld, SLOTS, NN, N };

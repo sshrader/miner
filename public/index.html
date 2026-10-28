@@ -203,6 +203,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         <div class="row"><span class="pool" id="poolLeft">$10.00</span><span class="unit" id="poolMeta">of $10.00</span></div>
         <div class="bar" aria-hidden="true"><i id="poolBar"></i></div>
         <div class="unit" id="poolBlocks">60 hidden rewards left</div>
+        <div class="unit" id="gateInfo" hidden></div>
       </div>
 
       <div class="card" id="devCard" hidden>
@@ -256,7 +257,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <button class="btn btn-ghost btn-sm" type="button" data-lv="6" aria-pressed="false">7</button>
           <button class="btn btn-ghost btn-sm" type="button" data-lv="7" aria-pressed="false">8</button>
         </div>
-        <div class="unit">Levels above the one you view are cut away. Deeper levels hold bigger rewards.</div>
+        <div class="unit">Levels above the one you view are cut away. Deeper levels hold bigger rewards, and each level opens only once all of its rewards are found.</div>
       </div>
 
       <div class="card">
@@ -292,7 +293,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Change this to your ticker. It appears in the header and footer.
   var TICKER = '$BEDROCK';
   var DEV = null;   // set when this page is served by server.js (devnet mode)
-  var netBots = {}, evtSrc = null, lastPoolKey = '';
+  var netBots = {}, evtSrc = null, lastPoolKey = '', hardMult = 1;
 
   // The mine: LV stacked levels, each X by Z cells. Wall cells are tall rock pillars (height PH) standing on a floor slab (thickness FT).
   // Digging a floor slab opens a shaft down to the next level.
@@ -441,7 +442,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     m.setMatrixAt(inst[g], mtx); m.instanceMatrix.needsUpdate = true;
   }
   function shadeBlock(g) {
-    var v = 1 - 0.55 * dmg[g] / HARD[btype[g]], m = pillars[gl(g)][btype[g]];
+    var v = 1 - 0.55 * dmg[g] / Math.ceil(HARD[btype[g]] * hardMult), m = pillars[gl(g)][btype[g]];
     tmpCol.setRGB(v, v, v); m.setColorAt(inst[g], tmpCol); m.instanceColor.needsUpdate = true;
   }
   function setFloor(g, s) {
@@ -451,7 +452,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     floors[l].setMatrixAt(g % N, mtx); floors[l].instanceMatrix.needsUpdate = true;
   }
   function shadeFloor(g) {
-    var v = 1 - 0.5 * fdmg[g] / FHARD, m = floors[gl(g)];
+    var v = 1 - 0.5 * fdmg[g] / Math.ceil(FHARD * hardMult), m = floors[gl(g)];
     tmpCol.setRGB(v, v, v); m.setColorAt(g % N, tmpCol); m.instanceColor.needsUpdate = true;
   }
 
@@ -853,10 +854,19 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('sRewards').textContent = String(stats.rewards);
     $('sBest').textContent = fmt(stats.best);
   }
+  var gate = null;   // {open: levels unlocked, lv: rewards left per level}
+  function updateGate() {
+    var el = $('gateInfo');
+    if (!gate || !DEV || !gate.lv) { el.hidden = true; return; }
+    var cur = gate.lv[gate.open - 1] || 0;
+    el.hidden = false;
+    el.textContent = gate.open >= gate.lv.length && cur === 0 ? 'All levels open.' : 'Level ' + gate.open + ' of ' + gate.lv.length + ' is open: find its ' + cur + (cur === 1 ? ' last reward' : ' remaining rewards') + ' to unlock level ' + (gate.open + 1) + '.';
+  }
   function updatePool() {
     $('poolLeft').textContent = fmt(poolLeft);
     $('poolMeta').textContent = 'of ' + fmt(POOL_TOTAL);
     $('poolBar').style.width = (poolLeft / POOL_TOTAL * 100).toFixed(1) + '%';
+    updateGate();
     $('poolBlocks').textContent = rewardsLeft + (rewardsLeft === 1 ? ' hidden reward left' : ' hidden rewards left');
   }
   function renderMiners() {
@@ -1035,11 +1045,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function adopt(s) {
     var sid = DEV ? DEV.sessionId : null, ver = DEV ? !!DEV.verified : false;
     DEV = s; DEV.sessionId = sid; DEV.verified = ver;
-    POOL_TOTAL = s.poolTotal; poolLeft = s.poolLeft; rewardsLeft = s.rewardsLeft;
+    POOL_TOTAL = s.poolTotal; poolLeft = s.poolLeft; rewardsLeft = s.rewardsLeft; if (s.levelsLeft) gate = { open: s.unlocked, lv: s.levelsLeft };
     $('devAddr').textContent = s.rewardWallet;
     $('devBal').textContent = s.balance == null ? 'RPC unreachable' : (s.balance / 1e9).toFixed(4) + ' SOL';
     $('devNote').textContent = s.dryRun ? 'Dry run: no transactions are sent, payouts are fake.' :
-      (s.needsFunding ? 'Send devnet SOL to this address (faucet.solana.com), then press New pool.' : 'Rewards are paid from this wallet to the wallet you connect.');
+      (s.needsFunding ? 'Send devnet SOL to this address (faucet.solana.com), then press New pool.' : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + '.';
     if (s.needsFunding && !session) showMsg('The reward wallet has no devnet SOL yet. Fund it, then press New pool in the side panel.', false);
     updatePool();
   }
@@ -1078,6 +1088,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       showMsg('This page and the server are different versions. Hard-refresh the page (Ctrl+Shift+R).', false); $('gate').hidden = false;
       return;
     }
+    hardMult = w.hm || 1;
     unb64(w.grid, grid); unb64(w.dmg, dmg); unb64(w.fgrid, fgrid); unb64(w.fdmg, fdmg);
     claim.fill(0); ys.fill(1); lowered = {}; rew.fill(0); frew.fill(0);
     var l, i, g;
@@ -1128,9 +1139,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
   var STATE_WORD = { spawn: 'Descending', think: 'Thinking', wait: 'Waiting', move: 'Walking', mine: 'Digging', descend: 'Dropping down', celebrate: 'Found something', idle: 'Opening a new mine' };
   function netTick(m) {
-    var key = m.pool.left + ':' + m.pool.rewards;
+    var key = m.pool.left + ':' + m.pool.rewards + ':' + m.pool.unlocked;
     if (key !== lastPoolKey) {
-      lastPoolKey = key; poolLeft = m.pool.left; rewardsLeft = m.pool.rewards;
+      lastPoolKey = key; gate = { open: m.pool.unlocked, lv: m.pool.lv }; poolLeft = m.pool.left; rewardsLeft = m.pool.rewards;
       if (DEV) { DEV.poolLeft = poolLeft; DEV.rewardsLeft = rewardsLeft; }
       updatePool();
     }
@@ -1181,6 +1192,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     } else if (e.e === 'paid') {
       if (b && b === player) log('View payout on devnet', 'win', 'https://explorer.solana.com/tx/' + e.sig + '?cluster=devnet');
       api('/api/state').then(adopt).catch(function () {});
+    } else if (e.e === 'unlock') {
+      log('Level ' + e.lv + ' unlocked: every reward on the level above was found. Miners can dig down.', 'win');
     } else if (e.e === 'perr') {
       if (b && b === player) log(e.msg, 'sim');
     } else if (e.e === 'join') {
