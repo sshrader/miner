@@ -13,7 +13,7 @@ const args = process.argv.slice(2);
 const arg = (n) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : undefined; };
 
 (async () => {
-  if (/mainnet/i.test(RPC_URL)) { console.error('Refusing to run: this tool is devnet only.'); process.exit(1); }
+  if (/mainnet/i.test(RPC_URL) || process.env.NETWORK === 'mainnet') { console.error('Refusing to run: this tool only makes throwaway DEVNET tokens. Your real coin already exists.'); process.exit(1); }
   const walletFile = path.join(__dirname, 'reward-wallet.json');
   if (!fs.existsSync(walletFile)) { console.error('No reward-wallet.json yet. Run "npm start" once to create it, then stop the server and run this.'); process.exit(1); }
   const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(walletFile, 'utf8'))));

@@ -25,7 +25,11 @@ const AUTO_SCALE = process.env.AUTO_SCALE !== '0';
 const REF_MINERS = Math.max(1, Number(process.env.REF_MINERS) || 6);
 const HARD_CAP = Math.max(1, Number(process.env.HARD_CAP) || 30);
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
-const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
+// NETWORK=devnet (default) pays worthless test tokens. NETWORK=mainnet pays REAL funds and needs several explicit safeguards (see the README).
+const NETWORK = String(process.env.NETWORK || 'devnet').toLowerCase();
+if (NETWORK !== 'devnet' && NETWORK !== 'mainnet') { console.error('NETWORK must be devnet or mainnet.'); process.exit(1); }
+const MAINNET = NETWORK === 'mainnet';
+const RPC_URL = process.env.RPC_URL || (MAINNET ? '' : 'https://api.devnet.solana.com');
 const POOL_SOL = parseFloat(process.env.POOL_SOL || '0.5');
 // The Solana library is only needed for real devnet payouts. A dry run (--dry-run) works without installing it.
 const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
@@ -58,7 +62,7 @@ const HOLD_REQUIRED = TOKEN_MODE && MIN_HOLD_UI > 0;
 // By default anyone can paste an address and mine (rewards go to that address, so borrowing someone else's gains nothing).
 // REQUIRE_SIGNATURE=1 makes every miner prove ownership with a wallet signature instead.
 const REQUIRE_SIGNATURE = process.env.REQUIRE_SIGNATURE === '1';
-const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+const GENESIS = MAINNET ? '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' : 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 
 // Difficulty presets. Easy is for testing; harder ones are for a live game. Any single setting can be overridden with its own variable.
 //   perLevel = hidden rewards in every level; ALL of a level's rewards must be found before the next level unlocks
@@ -102,9 +106,18 @@ function isAdmin(req) {
 const WALLET_FILE = path.join(__dirname, 'reward-wallet.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-if (/mainnet/i.test(RPC_URL)) {
-  console.error('Refusing to start: RPC_URL looks like mainnet. This project is devnet only.');
-  process.exit(1);
+function fatal(msg) { console.error('Refusing to start: ' + msg); process.exit(1); }
+if (!MAINNET && /mainnet/i.test(RPC_URL)) fatal('RPC_URL looks like mainnet but NETWORK is devnet. Set NETWORK=mainnet on purpose, or use a devnet URL.');
+if (MAINNET) {
+  // Real money: every one of these must be a deliberate choice.
+  if (DRY_RUN) fatal('a dry run cannot use NETWORK=mainnet.');
+  if (process.env.CONFIRM_MAINNET !== 'yes-i-am-using-real-funds') fatal('NETWORK=mainnet also needs CONFIRM_MAINNET=yes-i-am-using-real-funds.');
+  if (!RPC_URL) fatal('set RPC_URL to your mainnet RPC provider (the public endpoint is rate limited).');
+  if (/devnet|testnet/i.test(RPC_URL)) fatal('RPC_URL looks like devnet or testnet but NETWORK is mainnet.');
+  if (!process.env.ADMIN_KEY || process.env.ADMIN_KEY.length < 24) fatal('set ADMIN_KEY to a long random value (at least 24 characters).');
+  if (!process.env.REWARD_WALLET_JSON && !fs.existsSync(path.join(__dirname, 'reward-wallet.json'))) fatal('no reward wallet. Set REWARD_WALLET_JSON (a wallet you funded yourself); a new one is never created on mainnet.');
+  if (!(Number(process.env.MAX_PAYOUT_PER_HOUR) > 0)) fatal('set MAX_PAYOUT_PER_HOUR (most that can be paid out in any hour, in tokens or SOL) so a bug cannot drain the wallet.');
+  if (!process.env.TRUST_PROXY && HOST !== '127.0.0.1') console.warn('WARNING: TRUST_PROXY is not set, so IP limits will see your proxy instead of visitors.');
 }
 
 function fakeAddress() {
@@ -119,6 +132,7 @@ function loadWallet() {
   if (fs.existsSync(WALLET_FILE)) {
     return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'))));
   }
+  if (MAINNET) fatal('no reward wallet and a new one is never created on mainnet.');
   const kp = Keypair.generate();
   fs.writeFileSync(WALLET_FILE, JSON.stringify(Array.from(kp.secretKey)), { mode: 0o600 });
   console.log('Created a new throwaway DEVNET wallet in reward-wallet.json');
@@ -128,6 +142,7 @@ function loadWallet() {
 const payer = loadWallet();
 const connection = DRY_RUN ? null : new Connection(RPC_URL, 'confirmed');
 const explorer = 'https://explorer.solana.com';
+const clusterQ = MAINNET ? '' : '?cluster=devnet';
 
 let dryExtra = 0;   // dry run only: pretend fees arrived, see /api/dry-fund
 const dryHolders = new Map();   // dry token mode: made-up holder balances (base units), set by the admin
@@ -186,8 +201,10 @@ let inflight = 0;     // rewards reserved for a payout that has not confirmed ye
 let excess = 0;       // balance above the configured pool when it was built; ignored by top-ups
 let avgReward = 0;
 // Splits `total` lamports over the given reward cells; deeper cells get bigger shares and every reward is at least MIN_REWARD.
+// Where rewards hide and how big they are must not be guessable, so these use the operating system's secure random source.
+const secureRand = () => crypto.randomBytes(6).readUIntBE(0, 6) / 281474976710656;
 function splitAmounts(keys, total) {
-  const w = keys.map((k) => { const r = Math.random(); return (0.25 + r * r * 3) * (1 + 0.45 * levelOfKey(k)); });
+  const w = keys.map((k) => { const r = secureRand(); return (0.25 + r * r * 3) * (1 + 0.45 * levelOfKey(k)); });
   const sum = w.reduce((a, b) => a + b, 0), spare = total - keys.length * MIN_REWARD;
   const amts = w.map((x) => MIN_REWARD + Math.floor(spare * x / sum));
   amts[amts.indexOf(Math.max(...amts))] += total - amts.reduce((a, b) => a + b, 0);
@@ -254,7 +271,12 @@ async function state() {
   // Funded after startup? Build the pool automatically so no manual reset is needed.
   if (pool.total === 0 && bal != null && bal - RESERVE >= 2 * MIN_REWARD) { await buildPool(); bal = await getBalance(false); }
   return {
-    devnet: true,
+    devnet: true,   // true whenever this server (not the plain simulated page) answered; see `network` for the chain
+    network: NETWORK,
+    clusterQ,
+    paused, pauseReason,
+    limits: { perIp: MAX_PER_IP, walletCap: MAX_WALLET_PAYOUT, hourCap: MAX_PER_HOUR_UI > 0 ? MAX_PER_HOUR_UI * UI() : 0, switchMinutes: IP_SWITCH_MS / 60000 },
+    hourPaid: MAX_PER_HOUR_UI > 0 ? hourTotal() : undefined, hourCap: MAX_PER_HOUR_UI * UI() || undefined,
     dryRun: DRY_RUN,
     asset: { token: TOKEN_MODE, sym: TOKEN_SYMBOL, dec: DEC },
     mint: TOKEN_MINT || null,
@@ -307,6 +329,60 @@ const clients = new Set();
 function hashStr(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
 
 // Called by the shared mine for every block or floor a miner breaks. The server alone decides which digs pay.
+// Global safety valves: an hourly payout ceiling, an admin pause, and an automatic pause after repeated payout failures.
+const MAX_PER_HOUR_UI = Number(process.env.MAX_PAYOUT_PER_HOUR) || 0;   // in tokens or SOL; 0 = no ceiling (devnet only)
+const FAIL_PAUSE = Math.max(1, Math.floor(Number(process.env.PAUSE_AFTER_FAILURES) || 5));
+let paused = false, pauseReason = '', failStreak = 0;
+const recentPays = [];   // { t, amt } of rewards reserved in the last hour
+function hourTotal() { const cut = Date.now() - 3600000; while (recentPays.length && recentPays[0].t < cut) recentPays.shift(); return recentPays.reduce((a, r) => a + r.amt, 0); }
+function setPaused(on, why) {
+  if (paused === on) return;
+  paused = on; pauseReason = on ? (why || 'Paused by the admin') : ''; failStreak = 0;
+  console.log(on ? 'PAYOUTS PAUSED: ' + pauseReason : 'Payouts resumed');
+  try { world.emit({ e: on ? 'paused' : 'resumed', msg: pauseReason }); } catch (e) { /* ignore */ }
+}
+const STATE_FILE = process.env.STATE_FILE || '';   // e.g. /data/state.json on a Railway volume; empty = nothing is saved
+const SAVE_EVERY_MS = 10000;
+let saveDirty = false;
+function saveState() {
+  if (!STATE_FILE) return;
+  try {
+    const st = {
+      v: 1, network: NETWORK, wallet: payer.publicKey.toBase58(), mint: TOKEN_MINT || null, savedAt: Date.now(),
+      world: world.exportState(), pool: { total: pool.total, left: pool.left, cells: Array.from(pool.cells.entries()) },
+      avgReward, excess, unlockedLv, paused, pauseReason, muted: Array.from(muted), paidBy: Array.from(paidBy.entries()), recentPays: recentPays.slice(),
+    };
+    fs.mkdirSync(path.dirname(path.resolve(STATE_FILE)), { recursive: true });
+    const tmp = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(st));
+    fs.renameSync(tmp, STATE_FILE);   // replace in one step, so a crash never leaves half a file
+    saveDirty = false;
+  } catch (e) { console.error('Could not save state: ' + e.message); }
+}
+// Returns true when the saved mine and pool were restored. Anything odd (other wallet, other network, pool bigger than the wallet) falls back to a fresh pool.
+async function loadState() {
+  if (!STATE_FILE || !fs.existsSync(STATE_FILE)) return false;
+  try {
+    const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (st.v !== 1 || st.network !== NETWORK || (!DRY_RUN && st.wallet !== payer.publicKey.toBase58()) || (st.mint || null) !== (TOKEN_MINT || null)) { console.log('Saved state belongs to a different wallet or network; starting fresh.'); return false; }
+    const bal = await getBalance(true);
+    if (bal == null) { console.log('Could not read the wallet balance; starting fresh instead of trusting the saved state.'); return false; }
+    const left = Number(st.pool.left) || 0;
+    if (left > bal - RESERVE) { console.log('The wallet holds less than the saved pool (it was swept or spent); starting fresh.'); return false; }
+    if (!world.importState(st.world)) { console.log('Saved cave is unreadable; starting fresh.'); return false; }
+    pool = { total: Number(st.pool.total) || 0, left, cells: new Map(st.pool.cells.map(([k, v]) => [Number(k), Number(v)])) };
+    avgReward = Number(st.avgReward) || 0;
+    excess = Math.max(0, bal - RESERVE - left);   // anything above the saved pool counts as new money for top-ups
+    excess = Math.min(excess, Number(st.excess) || 0);
+    unlockedLv = Number(st.unlockedLv) || 0; world.setUnlocked(unlockedLv); recomputeUnlock();
+    paused = !!st.paused; pauseReason = st.pauseReason || '';
+    (st.muted || []).forEach((a) => muted.add(a));
+    (st.paidBy || []).forEach(([a, r]) => paidBy.set(a, r));
+    (st.recentPays || []).forEach((r) => recentPays.push(r));
+    console.log(`Restored saved mine: ${showAmt(pool.left)} left in ${pool.cells.size} hidden spots` + (paused ? ' (payouts are PAUSED)' : ''));
+    return true;
+  } catch (e) { console.log('Could not read saved state (' + e.message + '); starting fresh.'); return false; }
+}
 const paidBy = new Map();   // address -> { amt, since } for the per-wallet cap
 function sessionOfMiner(id) { for (const [sid, s2] of sessions) if (s2.minerId === id) return [sid, s2]; return [null, null]; }
 class HoldError extends Error {}
@@ -314,6 +390,8 @@ function onDig(m, info) {
   const key = info.kind === 'floor' ? NN + info.g : info.g;
   const amt = pool.cells.get(key) || 0;
   if (!amt) return 0;
+  if (paused) return 0;   // digging goes on, rewards stay hidden until payouts resume
+  if (MAX_PER_HOUR_UI > 0 && hourTotal() + amt > MAX_PER_HOUR_UI * UI()) return 0;
   const [sid, sess] = sessionOfMiner(m.id);
   // A wallet below the minimum holding, or over its cap, digs the block but the reward stays hidden for someone else.
   if (HOLD_REQUIRED && (!sess || sess.hold == null || sess.hold < MIN_HOLD)) return 0;
@@ -322,6 +400,7 @@ function onDig(m, info) {
   if (MAX_WALLET_PAYOUT > 0 && rec.amt + amt > MAX_WALLET_PAYOUT) return 0;
   pool.cells.delete(key);
   recomputeUnlock();
+  recentPays.push({ t: Date.now(), amt });
   pool.left -= amt;   // reserved right away so two miners can never be paid the same reward
   rec.amt += amt;
   inflight += amt;
@@ -333,6 +412,7 @@ function onDig(m, info) {
     return pay(m.addr, amt);
   };
   go().then((sig) => {
+    failStreak = 0;
     inflight -= amt;
     balanceCache.at = 0;
     world.emit({ e: 'paid', by: m.id, amt, sig });
@@ -340,6 +420,7 @@ function onDig(m, info) {
   }).catch((err) => {
     inflight -= amt;
     rec.amt -= amt;
+    { const i = recentPays.findIndex((r) => r.amt === amt); if (i >= 0) recentPays.splice(i, 1); }
     pool.left += amt;
     const per = new Array(LV).fill(0); per[levelOfKey(key)] = 1;
     const again = world.pickRewardCells(per);   // put the unpaid reward back into a fresh hiding spot on the same level
@@ -348,11 +429,13 @@ function onDig(m, info) {
     const msg = hold ? err.message : 'Payout failed, will retry on a later dig: ' + String((err && err.message) || err).slice(0, 140);
     world.emit({ e: 'perr', by: m.id, msg });
     console.error(msg);
+    if (!(err instanceof HoldError) && ++failStreak >= FAIL_PAUSE) setPaused(true, 'Payouts paused automatically after ' + failStreak + ' failures in a row.');
     if (hold && sid) kick(sid, 'Removed from the mine: your ' + TOKEN_SYMBOL + ' balance is below the minimum.');
   });
   return amt;
 }
 const world = createWorld({
+  rand: secureRand,
   onDig,
   // The mine was dug out and rebuilt: hide the rewards that are left in the new cave.
   onRegen() {
@@ -484,14 +567,31 @@ async function promote() {
   } finally { promoting = false; }
 }
 const joinLog = new Map();   // ip -> recent join times, to slow down hammering
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+function setSecurityHeaders(res) {
+  res.setHeader('Content-Security-Policy', CSP);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  if (MAINNET) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+}
+const streamsByIp = new Map();
+const MAX_STREAMS_PER_IP = Number(process.env.MAX_STREAMS_PER_IP) || 6, MAX_STREAMS = Number(process.env.MAX_STREAMS) || 400;
+const muted = new Set();   // wallet addresses that may not chat
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    setSecurityHeaders(res);
+    if (url.pathname === '/healthz') return send(res, 200, { ok: true, paused, miners: world.miners.size });
     if (req.method === 'POST') {
       const origin = req.headers.origin;
       if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}` && !ALLOWED_ORIGINS.includes(origin)) return send(res, 403, { error: 'Bad origin' });
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
+      const sip = ipOf(req);
+      if (clients.size >= MAX_STREAMS || (streamsByIp.get(sip) || 0) >= MAX_STREAMS_PER_IP) return send(res, 429, { error: 'Too many open views' });
+      streamsByIp.set(sip, (streamsByIp.get(sip) || 0) + 1);
+      req.on('close', () => { const n = (streamsByIp.get(sip) || 1) - 1; if (n > 0) streamsByIp.set(sip, n); else streamsByIp.delete(sip); });
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
       res.write('retry: 2000\n\n');
       res.write('data: ' + JSON.stringify(world.worldMsg()) + '\n\n');
@@ -504,7 +604,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/challenge' && req.method === 'POST') {
       const body = await readBody(req);
       let a; try { a = checkAddr(String(body.address)); } catch (e) { return send(res, 400, { error: 'Invalid wallet address' }); }
-      const message = 'Bedrock Bots devnet: I want to mine with wallet ' + a + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
+      const message = 'Bedrock Bots ' + NETWORK + ': I want to mine with wallet ' + a + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
       if (challenges.size > 5000) challenges.clear();
       challenges.set(a, { message, at: Date.now() });
       return send(res, 200, { message });
@@ -603,6 +703,8 @@ const server = http.createServer(async (req, res) => {
       if (!sess) return send(res, 404, { error: 'Unknown session' });
       const text = String(body.text || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 140);
       if (!text) return send(res, 400, { error: 'Empty message' });
+      if (muted.has(sess.address)) return send(res, 403, { error: 'You have been muted' });
+      if (/https?:|www\.|[a-z0-9-]+\.(com|net|org|io|xyz|app|gg|me|sol|fun|ly|co)\b/i.test(text)) return send(res, 400, { error: 'Links are not allowed in chat' });
       const now = Date.now();
       if (now - (sess.lastChat || 0) < 1500) return send(res, 429, { error: 'Slow down a little' });
       sess.lastChat = now;
@@ -614,7 +716,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const sess = sessions.get(String(body.sessionId));
       if (!sess) return send(res, 404, { error: 'Unknown session' });
-      sess.challenge = 'Bedrock Bots devnet: I own wallet ' + sess.address + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
+      sess.challenge = 'Bedrock Bots ' + NETWORK + ': I own wallet ' + sess.address + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
       return send(res, 200, { message: sess.challenge });
     }
     if (url.pathname === '/api/verify' && req.method === 'POST') {
@@ -629,7 +731,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { verified: true });
     }
     if (url.pathname === '/api/admin-check' && req.method === 'POST') return send(res, isAdmin(req) ? 200 : 403, { admin: isAdmin(req) });
-    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
+    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
     if (url.pathname === '/api/dry-holder' && req.method === 'POST' && DRY_RUN) {
       const body = await readBody(req);
       dryHolders.set(String(body.address), Math.round((Number(body.amount) || 0) * UI()));
@@ -639,6 +741,18 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       dryExtra += Math.round((Number(body.sol) || Number(body.amount) || 0) * (TOKEN_MODE ? UI() : LAMPORTS_PER_SOL));
       await topUp();
+      return send(res, 200, await state());
+    }
+    if (url.pathname === '/api/mute' && req.method === 'POST') {
+      const body = await readBody(req);
+      const a = String(body.address || '').trim();
+      if (!a) return send(res, 400, { error: 'address required' });
+      if (body.off) muted.delete(a); else { muted.add(a); if (body.kick) for (const [sid, s2] of sessions) if (s2.address === a) kick(sid, 'Removed from the mine by the admin.'); }
+      return send(res, 200, { muted: Array.from(muted) });
+    }
+    if (url.pathname === '/api/pause' && req.method === 'POST') {
+      const body = await readBody(req);
+      setPaused(body.paused !== false, 'Paused by the admin');
       return send(res, 200, await state());
     }
     if (url.pathname === '/api/reset-pool' && req.method === 'POST') {
@@ -660,8 +774,9 @@ const server = http.createServer(async (req, res) => {
   if (!DRY_RUN) {
     try {
       const g = await connection.getGenesisHash();
-      if (g !== DEVNET_GENESIS) { console.error('Refusing to start: that RPC is not Solana devnet.'); process.exit(1); }
+      if (g !== GENESIS) { console.error('Refusing to start: that RPC is not Solana ' + NETWORK + '.'); process.exit(1); }
     } catch (e) {
+      if (MAINNET) fatal('could not reach the RPC to confirm it is mainnet.');
       console.warn('Could not reach the RPC to verify devnet (' + RPC_URL + '). Continuing; payouts will fail until it is reachable.');
     }
   }
@@ -669,17 +784,23 @@ const server = http.createServer(async (req, res) => {
     try {
       mintKey = new PublicKey(TOKEN_MINT);
       const info = await connection.getAccountInfo(mintKey, 'confirmed');
-      if (!info) { console.error('That mint does not exist on devnet: ' + TOKEN_MINT); process.exit(1); }
+      if (!info) { console.error('That mint does not exist on ' + NETWORK + ': ' + TOKEN_MINT); process.exit(1); }
       tokenProgram = info.owner;
       const mint = await spl.getMint(connection, mintKey, 'confirmed', tokenProgram);
       DEC = mint.decimals;
       payerAta = spl.getAssociatedTokenAddressSync(mintKey, payer.publicKey, true, tokenProgram);
-    } catch (e) { console.error('Could not read the token from devnet: ' + e.message); process.exit(1); }
+    } catch (e) { console.error('Could not read the token from ' + NETWORK + ': ' + e.message); process.exit(1); }
   }
   configureAsset();
   configureTopup();
   if (TOKEN_MODE) console.log(`Token mode: paying ${TOKEN_SYMBOL}${TOKEN_MINT ? ' (' + TOKEN_MINT + ')' : ' (dry run)'}, ${DEC} decimals. Minimum holding: ${HOLD_REQUIRED ? (MIN_HOLD / UI()).toLocaleString('en-US') + ' ' + TOKEN_SYMBOL : 'none'}.`);
-  await buildPool();
+  if (!(await loadState())) await buildPool();
+  if (STATE_FILE) {
+    setInterval(saveState, SAVE_EVERY_MS);
+    const bye = () => { saveState(); process.exit(0); };
+    process.on('SIGTERM', bye); process.on('SIGINT', bye);
+    saveState();
+  } else if (MAINNET) console.log('WARNING: STATE_FILE is not set, so a restart forgets the mine and the per-wallet limits. Put it on a persistent volume.');
   let lastT = Date.now(), n = 0;
   setInterval(() => {
     const now = Date.now(), dt = Math.min(0.2, (now - lastT) / 1000);
@@ -716,9 +837,9 @@ const server = http.createServer(async (req, res) => {
   server.listen(PORT, HOST, () => {
     if (HOST !== '127.0.0.1' && !MAX_PER_IP) console.log('WARNING: the server is reachable from outside but MAX_PER_IP is not set.');
     console.log('');
-    console.log('Bedrock Bots (devnet) running at http://127.0.0.1:' + PORT);
+    console.log('Bedrock Bots (' + NETWORK + ') running at http://127.0.0.1:' + PORT);
     console.log('Admin link (keep private): ' + (ALLOWED_ORIGINS[0] || 'http://127.0.0.1:' + PORT) + '/#admin=' + ADMIN_KEY);
-    console.log('Reward wallet (send DEVNET ' + (TOKEN_MODE ? TOKEN_SYMBOL + ' and a little SOL for fees' : 'SOL') + ' here): ' + payer.publicKey.toBase58());
-    if (pool.total === 0) console.log(TOKEN_MODE ? 'The pool is empty. Send the token (node make-token.js does this) and some devnet SOL to the reward wallet; the pool builds itself.' : 'The wallet needs devnet SOL. Fund it at https://faucet.solana.com (network: devnet); the pool builds itself.');
+    console.log('Reward wallet (send ' + NETWORK.toUpperCase() + ' ' + (TOKEN_MODE ? TOKEN_SYMBOL + ' and a little SOL for fees' : 'SOL') + ' here): ' + payer.publicKey.toBase58());
+    if (pool.total === 0) console.log(TOKEN_MODE ? 'The pool is empty. Send the token (node make-token.js does this) and some SOL to the reward wallet; the pool builds itself.' : 'The wallet needs devnet SOL. Fund it at https://faucet.solana.com (network: devnet); the pool builds itself.');
   });
 })();

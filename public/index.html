@@ -240,12 +240,13 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       </div>
 
       <div class="card" id="devCard" hidden>
-        <span class="lbl">Devnet reward wallet</span>
+        <span class="lbl" id="devLbl">Reward wallet</span>
         <div class="unit" id="devAddr" style="font-family: var(--font-mono); overflow-wrap: anywhere; color: var(--fg)"></div>
         <div class="row"><span class="unit">Balance</span><span id="devBal" style="font: 500 14px var(--font-mono); color: var(--gold)">...</span></div>
         <div class="controls">
           <button class="btn btn-ghost btn-sm" id="copyAddr" type="button">Copy address</button>
           <button class="btn btn-ghost btn-sm" id="newPoolBtn" type="button" hidden>New pool (admin)</button>
+          <button class="btn btn-ghost btn-sm" id="pauseBtn" type="button" hidden>Pause payouts (admin)</button>
         </div>
         <div class="unit" id="devNote"></div>
       </div>
@@ -316,6 +317,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   <footer id="foot">
     The pool, fees and miners here are simulated game points stored in this browser. Nothing is paid out, and no token is sent or received. A game demo for <span data-ticker></span>.
   </footer>
+  <p class="fine" id="rulesNote" hidden><a href="/rules.html" target="_blank" rel="noopener">Rules, limits and payout policy</a></p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -346,6 +348,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   Array.prototype.forEach.call(document.querySelectorAll('[data-ticker]'), function (el) { el.textContent = TICKER; });
 
+  function isMain() { return !!(DEV && DEV.network === 'mainnet'); }
+  function netWord() { return isMain() ? '' : 'devnet '; }
   function isTok() { return !!(DEV && DEV.asset && DEV.asset.token); }
   function unitSym() { return isTok() ? DEV.asset.sym : 'SOL'; }
   function fmt(c) {
@@ -1134,18 +1138,24 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('devAddr').textContent = s.rewardWallet;
     $('devBal').textContent = s.balance == null ? 'RPC unreachable' : fmt(s.balance) + (isTok() && s.solBalance != null ? ' + ' + (s.solBalance / 1e9).toFixed(3) + ' SOL for fees' : '');
     $('devNote').textContent = s.dryRun ? 'Dry run: no transactions are sent, payouts are fake.' :
-      (s.needsFunding ? (isTok() ? 'Send ' + unitSym() + ' and a little devnet SOL (for fees) to this address; the pool builds itself once it arrives.' : 'Send devnet SOL to this address (faucet.solana.com); the pool builds itself once it arrives.') : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + (s.hardMult ? ' (blocks take ' + s.hardMult + 'x the hits' + (s.autoScale && s.hardMult > s.baseHardMult ? ', raised for the crowd' : '') + ')' : '') + '.' + (s.holdRequired ? ' Mining requires holding at least ' + fmt(s.minHold) + '.' : '');
+      (s.needsFunding ? (isTok() ? 'Send ' + unitSym() + ' and a little ' + netWord() + 'SOL (for fees) to this address; the pool builds itself once it arrives.' : 'Send ' + netWord() + 'SOL to this address' + (isMain() ? '' : ' (faucet.solana.com)') + '; the pool builds itself once it arrives.') : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + (s.hardMult ? ' (blocks take ' + s.hardMult + 'x the hits' + (s.autoScale && s.hardMult > s.baseHardMult ? ', raised for the crowd' : '') + ')' : '') + '.' + (s.holdRequired ? ' Mining requires holding at least ' + fmt(s.minHold) + '.' : '');
     applyAssetLabels();
+    $('pauseBtn').textContent = s.paused ? 'Resume payouts (admin)' : 'Pause payouts (admin)';
+    if (s.paused && !session) showMsg('Payouts are paused for now. Check back soon.', false);
     if (s.needsFunding && !session) showMsg('The reward pool is not funded yet. Check back soon.', false);
     if (s.maxMiners) $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to ' + s.maxMiners + ' miners at once' + (s.queueLength ? ', ' + s.queueLength + ' waiting in line.' : '.') + (s.shiftMinutes ? ' Shifts last ' + s.shiftMinutes + ' minutes when others are waiting.' : '');
     updatePool();
   }
   function applyAssetLabels() {
     if (!DEV) return;
-    var u = isTok() ? 'devnet ' + unitSym() : 'devnet SOL';
+    var u = netWord() + (isTok() ? unitSym() : 'SOL');
+    $('devLbl').textContent = isMain() ? 'Reward wallet' : 'Devnet reward wallet';
     $('poolLbl').textContent = 'Reward pool (' + u + ')';
     $('shareLbl').textContent = 'Your share (' + u + ')';
-    $('foot').textContent = 'Devnet test build. Rewards are ' + u + ', which has no real value, paid from a throwaway wallet by a server on this computer. This page only reads your public address' + (DEV.holdRequired ? ' and asks you to sign a free message (not a transaction) to prove you own it.' : '.');
+    $('foot').textContent = isMain()
+      ? 'Rewards are paid in ' + u + ' from a wallet run by this project, to the address you play with. This page only reads your public address' + (DEV.holdRequired ? ' and asks you to sign a free message (not a transaction) to prove you own it.' : '.') + ' Play at your own risk. Nothing here is financial advice.'
+      : 'Devnet test build. Rewards are ' + u + ', which has no real value, paid from a throwaway wallet by a server on this computer. This page only reads your public address' + (DEV.holdRequired ? ' and asks you to sign a free message (not a transaction) to prove you own it.' : '.');
+    $('rulesNote').hidden = false;
   }
   function applyDev(s) {
     DEV = null;
@@ -1187,7 +1197,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       joined(addr, r, pasted);
     }).catch(function (e) {
       setStatus('Idle');
-      showMsg(e && e.code === 4001 ? 'The signature request was declined, so no miner was sent in.' : (e && e.message) || 'Could not start a devnet session.', false);
+      showMsg(e && e.code === 4001 ? 'The signature request was declined, so no miner was sent in.' : (e && e.message) || 'Could not start a session.', false);
     });
   }
   function joined(addr, r, pasted) {
@@ -1348,13 +1358,16 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     } else if (e.e === 'reward') {
       if (b) collect(b, e.amt, e.x, e.y, e.z, e.what, true);
     } else if (e.e === 'paid') {
-      if (b && b === player) log('View payout on devnet', 'win', 'https://explorer.solana.com/tx/' + e.sig + '?cluster=devnet');
+      if (b && b === player) log('View payout' + (isMain() ? '' : ' on devnet'), 'win', 'https://explorer.solana.com/tx/' + e.sig + ((DEV && DEV.clusterQ) || ''));
       api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'topup') {
       log('Reward pool topped up: +' + fmt(e.amt) + ' in ' + e.n + ' new hidden ' + (e.n === 1 ? 'reward' : 'rewards') + '.', 'win');
       api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'unlock') {
       log('Level ' + e.lv + ' unlocked: every reward on the level above was found. Miners can dig down.', 'win');
+    } else if (e.e === 'paused' || e.e === 'resumed') {
+      log(e.e === 'paused' ? 'Payouts are paused for now. You can keep digging; rewards stay hidden.' : 'Payouts are back on.', 'sim');
+      api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'perr') {
       if (b && b === player) log(e.msg, 'sim');
     } else if (e.e === 'join') {
@@ -1853,10 +1866,14 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (o) { o.setAttribute('aria-pressed', o === btn ? 'true' : 'false'); });
     });
   });
-  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
+  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
   $('newPoolBtn').addEventListener('click', function () {
     api('/api/reset-pool', {}).then(function (s) { adopt(s); $('msg').hidden = true; log('New reward pool: ' + fmt(s.poolTotal) + ' in ' + s.rewardsLeft + ' hidden rewards.'); })
       .catch(function (e) { log('Could not reset the pool: ' + e.message, 'sim'); });
+  });
+  $('pauseBtn').addEventListener('click', function () {
+    api('/api/pause', { paused: !(DEV && DEV.paused) }).then(function (s) { adopt(s); log(s.paused ? 'Payouts paused.' : 'Payouts resumed.'); })
+      .catch(function (e) { log('Could not change pause: ' + e.message, 'sim'); });
   });
   $('copyAddr').addEventListener('click', function () {
     var a = $('devAddr').textContent, btn = $('copyAddr');

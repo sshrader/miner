@@ -92,6 +92,7 @@ const ITERS = [4, 3, 4, 3, 4, 3, 4, 3];
 
 // hooks.onDig(miner, info) is called for every block or floor a miner breaks. It returns a reward in lamports (0 for none).
 function createWorld(hooks, opts) {
+  const rnd = (hooks && hooks.rand) || Math.random;   // reward placement can use a secure source
   let hardMult = (opts && opts.hardMult) || 1;   // multiplies how many hits every block and floor takes (the server can change it as the crowd grows)
   const setHardMult = (x) => { hardMult = Math.max(0.5, Math.min(30, Number(x) || 1)); };
   const need = (type) => Math.ceil(HARD[type] * hardMult);
@@ -372,14 +373,25 @@ function createWorld(hooks, opts) {
       const cands = [];
       for (let g = l * N; g < (l + 1) * N; g++) { const t = grid[g]; if (t >= 1 && t <= 3) cands.push(g); }
       const k = Math.min(n, cands.length);
-      for (let i = 0; i < k; i++) { const j = i + ((Math.random() * (cands.length - i)) | 0); const t = cands[i]; cands[i] = cands[j]; cands[j] = t; out.push(cands[i]); }
+      for (let i = 0; i < k; i++) { const j = i + ((rnd() * (cands.length - i)) | 0); const t = cands[i]; cands[i] = cands[j]; cands[j] = t; out.push(cands[i]); }
     }
     return out;
   }
   function setUnlocked(u) { unlocked = Math.max(0, Math.min(LV - 1, u | 0)); }
 
   genWorld();
-  return { setHardMult, getHardMult: () => hardMult, pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
+  const un64 = (str, a) => { const b = Buffer.from(String(str), 'base64'); if (b.length !== a.length) return false; a.set(b); return true; };
+  // Saves and restores the cave itself so a restart does not throw away the digging.
+  function exportState() { return { v: 1, hm: hardMult, grid: b64(grid), dmg: b64(dmg), fgrid: b64(fgrid), fdmg: b64(fdmg), spawn }; }
+  function importState(st) {
+    if (!st || st.v !== 1 || !Array.isArray(st.spawn)) return false;
+    const t = [new Uint8Array(NN), new Uint8Array(NN), new Uint8Array(NN), new Uint8Array(NN)];
+    if (!un64(st.grid, t[0]) || !un64(st.dmg, t[1]) || !un64(st.fgrid, t[2]) || !un64(st.fdmg, t[3])) return false;
+    grid.set(t[0]); dmg.set(t[1]); fgrid.set(t[2]); fdmg.set(t[3]);
+    claim.fill(0); spawn = st.spawn.map(Number); hardMult = Number(st.hm) || hardMult; worldDirty = true;
+    return true;
+  }
+  return { exportState, importState, setHardMult, getHardMult: () => hardMult, pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
 }
 
 module.exports = { createWorld, SLOTS, NN, N };

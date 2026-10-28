@@ -166,3 +166,28 @@ Simulated time to clear level 1 on `easy`: 6 miners about 2 minutes, 50 miners a
 ## RPC usage
 
 The server makes a handful of RPC calls: a holder check when someone joins and every `HOLD_RECHECK_MS` per miner, a pool balance check every `TOPUP_EVERY_MS`, cached balance lookups for the page (20 seconds), and the payout transactions. With 12 miners online around the clock that is roughly 0.5 million calls a month, so a free plan from an RPC provider (for example 1 million credits a month) is enough for a small group. The public Solana endpoints are rate limited and not meant for this. Use a provider URL in `RPC_URL`, and make sure it allows WebSocket connections (payout confirmation uses one).
+
+## Going live on mainnet (checklist)
+
+Nothing here is legal advice. Before real money is involved, have a lawyer in your country look at the game, the pool and the rules page (`/rules.html`).
+
+**Safety valves built in**
+- `NETWORK=mainnet` refuses to start unless `CONFIRM_MAINNET=yes-i-am-using-real-funds`, a paid or private `RPC_URL`, an `ADMIN_KEY` of 24+ characters, a reward wallet supplied through `REWARD_WALLET_JSON` (it never creates one), and `MAX_PAYOUT_PER_HOUR`.
+- `MAX_PAYOUT_PER_HOUR` (in tokens or SOL): the game stops paying once that much went out in the last hour. Digging continues; rewards stay hidden.
+- Pause button: open your admin link and use **Pause payouts (admin)**. It pauses at once and survives restarts. The server also pauses itself after `PAUSE_AFTER_FAILURES` (default 5) payout failures in a row.
+- `MAX_WALLET_PAYOUT`: most one wallet can win per day. `MAX_PER_IP`: miners per connection. `MIN_HOLD`: token holding required to mine.
+- Chat blocks links; the admin can mute (and remove) a wallet with `POST /api/mute` `{ "address": "...", "kick": true }` and the header `x-admin-key`.
+- Open live views are capped per visitor (`MAX_STREAMS_PER_IP`, default 6) and in total (`MAX_STREAMS`, default 400). Security headers are sent on every page, and `/healthz` answers for uptime checks.
+- Reward positions and amounts use the operating system's secure random source.
+
+**Keeping state across restarts**
+Set `STATE_FILE=/data/state.json` and attach a Railway volume mounted at `/data`. The mine, hidden rewards, unlock progress, per-wallet totals, hourly totals, pause flag and muted wallets are saved every 10 seconds and on shutdown. On start, if the wallet now holds less than the saved pool (it was swept or spent), the saved state is ignored and a fresh pool is built.
+
+**Steps**
+1. Make a brand-new wallet just for the game. Never reuse the devnet one. Put only an amount you can afford to lose into it.
+2. Set the variables in Railway: `NETWORK=mainnet`, `CONFIRM_MAINNET`, `RPC_URL`, `REWARD_WALLET_JSON`, `ADMIN_KEY` (a fresh long random value that was never pasted anywhere), `ALLOWED_ORIGINS` (your https address), `HOST=0.0.0.0`, `TRUST_PROXY=1`, `STATE_FILE`, `MAX_PAYOUT_PER_HOUR`, `MAX_WALLET_PAYOUT`, `MAX_PER_IP`, and for a token `TOKEN_MINT`, `TOKEN_SYMBOL`, `MIN_HOLD`.
+3. Run `npm run preflight` with the same variables. Fix every FAIL.
+4. Turn on two-factor sign-in for Railway, GitHub and your wallet.
+5. Start with a small pool and a few friends. Watch the logs. Use the pause button at the first sign of trouble.
+6. Run `npm install` once locally and commit `package-lock.json` so builds are repeatable.
+7. At the end of the season, stop the server and use `npm run sweep` (add `--token` for tokens) to move what is left back to your wallet.

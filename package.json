@@ -8,7 +8,8 @@
     "dry": "node server.js --dry-run",
     "airdrop": "node airdrop.js",
     "sweep": "node sweep.js",
-    "token": "node make-token.js"
+    "token": "node make-token.js",
+    "preflight": "node preflight.js"
   },
   "engines": {
     "node": ">=20"

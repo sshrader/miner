@@ -9,8 +9,11 @@ const readline = require('readline');
 let spl = null;
 const { Connection, Keypair, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL, sendAndConfirmTransaction } = require('@solana/web3.js');
 
-const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
-const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
+const NETWORK = String(process.env.NETWORK || 'devnet').toLowerCase();
+const MAINNET = NETWORK === 'mainnet';
+const GENESIS = MAINNET ? '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d' : 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+const CLUSTER_Q = MAINNET ? '' : '?cluster=devnet';
+const RPC_URL = process.env.RPC_URL || (MAINNET ? '' : 'https://api.devnet.solana.com');
 const PORT = Number(process.env.PORT) || 3000;
 const FEE = 5000;
 const args = process.argv.slice(2);
@@ -28,7 +31,9 @@ function ask(q) {
   return new Promise((r) => rl.question(q, (a) => { rl.close(); r(a.trim().toLowerCase()); }));
 }
 (async () => {
-  if (/mainnet/i.test(RPC_URL)) { console.error('Refusing to run: this tool is devnet only.'); process.exit(1); }
+  if (!RPC_URL) { console.error('Set RPC_URL to your RPC provider.'); process.exit(1); }
+  if (!MAINNET && /mainnet/i.test(RPC_URL)) { console.error('RPC_URL looks like mainnet but NETWORK is devnet. Set NETWORK=mainnet to sweep real funds.'); process.exit(1); }
+  if (MAINNET && process.env.CONFIRM_MAINNET !== 'yes-i-am-using-real-funds') { console.error('NETWORK=mainnet also needs CONFIRM_MAINNET=yes-i-am-using-real-funds.'); process.exit(1); }
   const toStr = arg('to');
   if (!toStr) { console.error('Usage: node sweep.js --to <address> [--keep <SOL>] [--yes]'); process.exit(1); }
   let to;
@@ -38,13 +43,13 @@ function ask(q) {
   if (await serverRunning()) { console.error('The game server is still running on port ' + PORT + '. Stop it first (Ctrl+C), then run this again.'); process.exit(1); }
   const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(walletFile, 'utf8'))));
   const conn = new Connection(RPC_URL, 'confirmed');
-  if ((await conn.getGenesisHash()) !== DEVNET_GENESIS) { console.error('RPC is not devnet. Stopping.'); process.exit(1); }
+  if ((await conn.getGenesisHash()) !== GENESIS) { console.error('RPC is not ' + NETWORK + '. Stopping.'); process.exit(1); }
   if (args.includes('--token')) {
     const mintStr = process.env.TOKEN_MINT;
     if (!mintStr) { console.error('Set TOKEN_MINT to the token you want to sweep.'); process.exit(1); }
     spl = require('@solana/spl-token');
     const mint = new PublicKey(mintStr), info = await conn.getAccountInfo(mint, 'confirmed');
-    if (!info) { console.error('That mint does not exist on devnet.'); process.exit(1); }
+    if (!info) { console.error('That mint does not exist on ' + NETWORK + '.'); process.exit(1); }
     const programId = info.owner, m = await spl.getMint(conn, mint, 'confirmed', programId);
     const src = spl.getAssociatedTokenAddressSync(mint, payer.publicKey, true, programId);
     let amountT = 0n;
@@ -56,7 +61,7 @@ function ask(q) {
     if (amountT > 0n) tx.add(spl.createTransferCheckedInstruction(src, mint, dst, payer.publicKey, amountT, m.decimals, [], programId));
     tx.add(spl.createCloseAccountInstruction(src, payer.publicKey, payer.publicKey, [], programId));   // rent deposit goes back to the reward wallet as SOL
     const sigT = await sendAndConfirmTransaction(conn, tx, [payer], { commitment: 'confirmed' });
-    console.log('Sent. https://explorer.solana.com/tx/' + sigT + '?cluster=devnet\nRun the SOL sweep afterwards to move the rest of the SOL.');
+    console.log('Sent. https://explorer.solana.com/tx/' + sigT + CLUSTER_Q + '\nRun the SOL sweep afterwards to move the rest of the SOL.');
     return;
   }
   const bal = await conn.getBalance(payer.publicKey, 'confirmed');
@@ -68,5 +73,5 @@ function ask(q) {
   if (!args.includes('--yes') && (await ask('Type "yes" to send: ')) !== 'yes') { console.log('Cancelled.'); return; }
   const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: to, lamports: amount }));
   const sig = await sendAndConfirmTransaction(conn, tx, [payer], { commitment: 'confirmed' });
-  console.log('Sent. https://explorer.solana.com/tx/' + sig + '?cluster=devnet');
+  console.log('Sent. https://explorer.solana.com/tx/' + sig + CLUSTER_Q);
 })().catch((e) => { console.error('Sweep failed: ' + (e && e.message || e)); process.exit(1); });
