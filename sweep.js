@@ -1,10 +1,12 @@
 // Sends what is left in the reward wallet to an address you choose. DEVNET ONLY.
-//   node sweep.js --to <address> [--keep <SOL>] [--yes]
+//   node sweep.js --to <address> [--keep <SOL>] [--yes]          sends the leftover SOL
+//   node sweep.js --to <address> --token [--yes]                 sends the leftover tokens (needs TOKEN_MINT) and closes the token account to get its SOL deposit back
 // Stop the game server first: it reserves rewards the moment they are found and pays them a moment later.
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const readline = require('readline');
+let spl = null;
 const { Connection, Keypair, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL, sendAndConfirmTransaction } = require('@solana/web3.js');
 
 const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
@@ -37,6 +39,26 @@ function ask(q) {
   const payer = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(walletFile, 'utf8'))));
   const conn = new Connection(RPC_URL, 'confirmed');
   if ((await conn.getGenesisHash()) !== DEVNET_GENESIS) { console.error('RPC is not devnet. Stopping.'); process.exit(1); }
+  if (args.includes('--token')) {
+    const mintStr = process.env.TOKEN_MINT;
+    if (!mintStr) { console.error('Set TOKEN_MINT to the token you want to sweep.'); process.exit(1); }
+    spl = require('@solana/spl-token');
+    const mint = new PublicKey(mintStr), info = await conn.getAccountInfo(mint, 'confirmed');
+    if (!info) { console.error('That mint does not exist on devnet.'); process.exit(1); }
+    const programId = info.owner, m = await spl.getMint(conn, mint, 'confirmed', programId);
+    const src = spl.getAssociatedTokenAddressSync(mint, payer.publicKey, true, programId);
+    let amountT = 0n;
+    try { amountT = BigInt((await conn.getTokenAccountBalance(src, 'confirmed')).value.amount); } catch (e) { console.log('The reward wallet has no token account for this mint. Nothing to send.'); return; }
+    console.log('Reward wallet holds ' + (Number(amountT) / Math.pow(10, m.decimals)).toLocaleString('en-US') + ' tokens of ' + mintStr);
+    if (!args.includes('--yes') && (await ask('Send them all to ' + to.toBase58() + ' and close the token account? Type "yes": ')) !== 'yes') { console.log('Cancelled.'); return; }
+    const dst = spl.getAssociatedTokenAddressSync(mint, to, true, programId);
+    const tx = new Transaction().add(spl.createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, dst, to, mint, programId));
+    if (amountT > 0n) tx.add(spl.createTransferCheckedInstruction(src, mint, dst, payer.publicKey, amountT, m.decimals, [], programId));
+    tx.add(spl.createCloseAccountInstruction(src, payer.publicKey, payer.publicKey, [], programId));   // rent deposit goes back to the reward wallet as SOL
+    const sigT = await sendAndConfirmTransaction(conn, tx, [payer], { commitment: 'confirmed' });
+    console.log('Sent. https://explorer.solana.com/tx/' + sigT + '?cluster=devnet\nRun the SOL sweep afterwards to move the rest of the SOL.');
+    return;
+  }
   const bal = await conn.getBalance(payer.publicKey, 'confirmed');
   const keep = Math.round(Number(arg('keep') || 0) * LAMPORTS_PER_SOL);
   const amount = bal - FEE - keep;

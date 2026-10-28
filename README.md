@@ -113,3 +113,33 @@ Variables to set on Railway (devnet only for now):
 | `DIFFICULTY`, `SEASON_END`, `POOL_SOL` | as you like |
 
 Run exactly one instance: the mine lives in that process's memory. A restart rebuilds the mine and re-hides the unfound rewards from the wallet balance (rewards already paid stay paid).
+
+## Paying a token, and holder checks (devnet, throwaway token)
+
+Rewards can be paid in an SPL token instead of SOL, and mining can require holding a minimum amount. Test it with a throwaway devnet token first.
+
+1. `npm install` (this pulls in `@solana/spl-token`).
+2. Fund the reward wallet with about 0.1 devnet SOL (faucet.solana.com). It pays fees, and the token account for each first-time winner (about 0.002 SOL each).
+3. Stop the server and run `node make-token.js`. It creates a token, puts 1,000,000 of it in the reward wallet, and prints the start command. Give your own Phantom wallet some: `node make-token.js --mint <mint> --to <your address> --amount 5000`.
+4. Start with the token: PowerShell `$env:TOKEN_MINT="<mint>"; $env:TOKEN_SYMBOL="TEST"; $env:MIN_HOLD="1000"; npm start`.
+
+| Variable | Meaning |
+|---|---|
+| `TOKEN_MINT` | The token to pay. Leave out for SOL mode |
+| `TOKEN_SYMBOL` | Name shown in the page |
+| `MIN_HOLD` | Tokens a wallet must hold to mine. `0` or unset = no minimum |
+| `POOL_TOKENS` | Most tokens in the pool (default: everything the reward wallet holds) |
+| `MIN_REWARD_TOKENS` | Smallest single reward (default 1) |
+| `MAX_WALLET_PAYOUT` | Most tokens one wallet can win per 24 hours (`0` = no cap) |
+| `TOPUP_MIN_TOKENS` | Tokens that must arrive before a top-up (default 10x the smallest reward) |
+| `HOLD_RECHECK_MS` | How often holders are re-checked (default 60000) |
+
+With `MIN_HOLD` set:
+- A wallet signs a free message in Phantom (proof it owns the address, never a transaction), then the server checks its balance. Below the minimum, no miner is sent in and the page says how much is needed.
+- Every minute the server checks holders again; a wallet that sold below the minimum is removed from the mine.
+- Right before a payout it checks once more. If the balance dropped, the reward goes back into the mine.
+- Both the classic Token program and Token-2022 mints work (detected from the mint).
+
+Dry-run testing without a network: `DRY_RUN=1 DRY_TOKEN=1 MIN_HOLD=100 node server.js`, then give a wallet a fake balance with `POST /api/dry-holder {"address":"...","amount":500}` using your admin key header (`x-admin-key`).
+
+Sweep leftover tokens when the season is over: `$env:TOKEN_MINT="<mint>"; node sweep.js --to <address> --token`, then `node sweep.js --to <address>` for the SOL.

@@ -328,7 +328,13 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   Array.prototype.forEach.call(document.querySelectorAll('[data-ticker]'), function (el) { el.textContent = TICKER; });
 
-  function fmt(c) { return DEV ? (c / 1e9).toFixed(4) + ' SOL' : '$' + (c / 100).toFixed(2); }
+  function isTok() { return !!(DEV && DEV.asset && DEV.asset.token); }
+  function unitSym() { return isTok() ? DEV.asset.sym : 'SOL'; }
+  function fmt(c) {
+    if (!DEV) return '$' + (c / 100).toFixed(2);
+    if (isTok()) { var v = c / Math.pow(10, DEV.asset.dec); return v.toLocaleString('en-US', { maximumFractionDigits: v >= 1000 ? 0 : 2 }) + ' ' + DEV.asset.sym; }
+    return (c / 1e9).toFixed(4) + ' SOL';
+  }
   function showMsg(text, withInstall) {
     var m = $('msg'); m.textContent = text; m.hidden = false;
     $('installLink').hidden = !withInstall;
@@ -1108,11 +1114,19 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     DEV = s; DEV.sessionId = sid; DEV.verified = ver;
     POOL_TOTAL = s.poolTotal; poolLeft = s.poolLeft; rewardsLeft = s.rewardsLeft; if (s.levelsLeft) gate = { open: s.unlocked, lv: s.levelsLeft };
     $('devAddr').textContent = s.rewardWallet;
-    $('devBal').textContent = s.balance == null ? 'RPC unreachable' : (s.balance / 1e9).toFixed(4) + ' SOL';
+    $('devBal').textContent = s.balance == null ? 'RPC unreachable' : fmt(s.balance) + (isTok() && s.solBalance != null ? ' + ' + (s.solBalance / 1e9).toFixed(3) + ' SOL for fees' : '');
     $('devNote').textContent = s.dryRun ? 'Dry run: no transactions are sent, payouts are fake.' :
-      (s.needsFunding ? 'Send devnet SOL to this address (faucet.solana.com); the pool builds itself once it arrives.' : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + '.';
+      (s.needsFunding ? (isTok() ? 'Send ' + unitSym() + ' and a little devnet SOL (for fees) to this address; the pool builds itself once it arrives.' : 'Send devnet SOL to this address (faucet.solana.com); the pool builds itself once it arrives.') : 'Rewards are paid from this wallet to the wallet you connect.') + ' Difficulty: ' + s.difficulty + '.' + (s.holdRequired ? ' Mining requires holding at least ' + fmt(s.minHold) + '.' : '');
+    applyAssetLabels();
     if (s.needsFunding && !session) showMsg('The reward pool is not funded yet. Check back soon.', false);
     updatePool();
+  }
+  function applyAssetLabels() {
+    if (!DEV) return;
+    var u = isTok() ? 'devnet ' + unitSym() : 'devnet SOL';
+    $('poolLbl').textContent = 'Reward pool (' + u + ')';
+    $('shareLbl').textContent = 'Your share (' + u + ')';
+    $('foot').textContent = 'Devnet test build. Rewards are ' + u + ', which has no real value, paid from a throwaway wallet by a server on this computer. This page only reads your public address' + (DEV.holdRequired ? ' and asks you to sign a free message (not a transaction) to prove you own it.' : '.');
   }
   function applyDev(s) {
     DEV = null;
@@ -1124,9 +1138,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to ' + s.maxMiners + ' miners at once.';
     connectStream();
     setInterval(pingSession, 5000);
-    $('poolLbl').textContent = 'Reward pool (devnet SOL)';
-    $('shareLbl').textContent = 'Your share (devnet SOL)';
-    $('foot').textContent = 'Devnet test build. Rewards are devnet SOL, which has no real value, paid from a throwaway wallet by a server on this computer. This page only reads your public address.';
+    applyAssetLabels();
     $('devCard').hidden = false;
     startChat();
     updateStats();
@@ -1135,11 +1147,29 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   var ready = api('/api/state').then(function (s) { if (s && s.devnet) applyDev(s); }).catch(function () { /* plain simulated mode */ });
   function begin(addr) {
     if (!DEV) { startSession(addr, 'wallet'); return; }
-    api('/api/session', { address: addr }).then(function (r) {
-      DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = false;
-      $('verifyBtn').textContent = 'Verify my wallet';
+    var p = getProvider(), step = Promise.resolve(null);
+    // A mine that requires a minimum holding also needs proof that you own the address (a free signed message, never a transaction).
+    if (DEV.holdRequired && !DEV.dryRun) {
+      if (!p || !p.signMessage) { showMsg('This wallet cannot sign messages, which this mine needs to check your ' + unitSym() + ' holding.', false); return; }
+      setStatus('Waiting for your signature');
+      step = api('/api/challenge', { address: addr }).then(function (r) {
+        return p.signMessage(new TextEncoder().encode(r.message), 'utf8');
+      }).then(function (sig) {
+        var bytes = sig.signature || sig, bin = '';
+        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+      });
+    }
+    step.then(function (signature) {
+      return api('/api/session', { address: addr, signature: signature });
+    }).then(function (r) {
+      DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = !!r.verified;
+      $('verifyBtn').textContent = r.verified ? 'Verified \u2713' : 'Verify my wallet';
       startSession(addr, 'wallet');
-    }).catch(function (e) { showMsg('Could not start a devnet session: ' + e.message, false); });
+    }).catch(function (e) {
+      setStatus('Idle');
+      showMsg(e && e.code === 4001 ? 'The signature request was declined, so no miner was sent in.' : (e && e.message) || 'Could not start a devnet session.', false);
+    });
   }
   /* ---------- shared live world (devnet mode) ---------- */
   // The server runs the mine and every miner. This page loads its world, then applies each change it streams.
@@ -1186,7 +1216,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     if (!DEV || !DEV.sessionId) return;
     var sid = DEV.sessionId;
     api('/api/ping', { sessionId: sid }).catch(function (e) {
-      if (DEV && DEV.sessionId === sid && /Unknown session/.test(e.message)) { log('You were disconnected from the mine. Connect again to rejoin.', 'sim'); endSession(); }
+      if (DEV && DEV.sessionId === sid && /Unknown session/.test(e.message)) { log(/Removed/.test(e.message) ? e.message.replace(/^Unknown session\.\s*/, '') : 'You were disconnected from the mine. Connect again to rejoin.', 'sim'); endSession(); }
     });
   }
   function adoptPlayer() {
@@ -1548,7 +1578,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     if (b === player) {
       stats.fees += amt; stats.rewards++;
       if (amt > stats.best) stats.best = amt;
-      var tier = DEV ? (amt < 5000000 ? 'Small find' : amt < 12000000 ? 'Nice find' : 'Jackpot') : (amt < 20 ? 'Small find' : amt < 60 ? 'Nice find' : 'Jackpot');
+      var avgR = DEV && POOL_TOTAL ? POOL_TOTAL / Math.max(1, rewardsLeft + 1 + stats.rewards) : 0;
+      var tier = DEV ? (isTok() ? (amt < avgR * 0.6 ? 'Small find' : amt < avgR * 1.6 ? 'Nice find' : 'Jackpot') : (amt < 5000000 ? 'Small find' : amt < 12000000 ? 'Nice find' : 'Jackpot')) : (amt < 20 ? 'Small find' : amt < 60 ? 'Nice find' : 'Jackpot');
       log(tier + ' in ' + what + ': +' + fmt(amt), 'win');
       setStatus('L' + (b.level + 1) + ' · Found something');
       save();
