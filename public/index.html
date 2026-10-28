@@ -63,6 +63,12 @@ h1 { margin: 0; font: 700 30px/1 var(--font-display); letter-spacing: 0.01em; te
 .chatform { display: flex; gap: 8px; }
 .chatform input { flex: 1 1 auto; min-width: 0; min-height: 38px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; font: 14px var(--font-body); }
 .chatform input:disabled { opacity: 0.5; }
+.chatbox { position: absolute; z-index: 4; right: 10px; bottom: 10px; width: min(340px, calc(100% - 20px)); display: flex; flex-direction: column; gap: 6px; padding: 8px; background: rgba(10, 9, 15, 0.84); border: 1px solid var(--line); border-radius: 8px; }
+.chatbox[hidden] { display: none; }
+.chathead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.chatbox .chatlog { min-height: 0; max-height: 150px; }
+.chatbox.min .chatlog, .chatbox.min .chatform { display: none; }
+@media (max-width: 700px) { .hint { display: none; } }
 .bubble { position: absolute; z-index: 3; transform: translate(-50%, -100%); width: max-content; max-width: 200px; font: 500 12px/1.3 var(--font-body); color: #14111C; background: rgba(236, 232, 244, 0.96); padding: 4px 9px; border-radius: 10px; pointer-events: none; overflow-wrap: anywhere; }
 @media (max-width: 1080px) {
   .stage { grid-template-columns: 1fr; }
@@ -160,6 +166,15 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         <canvas id="world" tabindex="0" aria-label="3D view of a four-level coal mine with miners digging into the walls and down through the floor. Drag to rotate, shift-drag or right-drag to pan, scroll or pinch to zoom. Arrow keys rotate, plus and minus zoom."></canvas>
         <div class="lvl" id="lvlTag">Level 1 of 4</div>
         <div class="hint">Click a name tag to follow &middot; Drag to rotate &middot; Shift-drag or two fingers to pan &middot; Scroll or pinch to zoom</div>
+        <div class="chatbox" id="chatCard" hidden>
+          <div class="chathead">
+            <button class="btn btn-ghost btn-sm" id="chatToggle" type="button" aria-expanded="true" title="Show or hide chat">Chat</button>
+            <button class="btn btn-ghost btn-sm" id="verifyBtn" type="button" disabled title="Sign a free text message in Phantom to prove you own this wallet. Not a transaction.">Verify my wallet</button>
+          </div>
+          <ul class="chatlog" id="chatLog" aria-live="polite"><li class="empty">No messages yet.</li></ul>
+          <form class="chatform" id="chatForm"><input id="chatInput" maxlength="140" autocomplete="off" placeholder="Say something" aria-label="Chat message" disabled><button class="btn btn-primary btn-sm" type="submit">Send</button></form>
+        </div>
+
         <div class="gate" id="gate">
           <div class="gate-card">
             <h2>Enter the mine</h2>
@@ -257,12 +272,6 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     <div class="card">
         <span class="lbl">Activity</span>
         <ul class="log" id="log"><li class="empty">Nothing yet. Enter the mine to start digging.</li></ul>
-    </div>
-    <div class="card" id="chatCard" hidden>
-      <div class="row"><span class="lbl">Miner chat</span><button class="btn btn-ghost btn-sm" id="verifyBtn" type="button" disabled>Verify my wallet</button></div>
-      <ul class="chatlog" id="chatLog" aria-live="polite"><li class="empty">No messages yet.</li></ul>
-      <form class="chatform" id="chatForm"><input id="chatInput" maxlength="140" autocomplete="off" placeholder="Say something" aria-label="Chat message" disabled><button class="btn btn-primary btn-sm" type="submit">Send</button></form>
-      <div class="unit">Everyone connected to this server shares this chat. A green check means that wallet signed a text message to prove it owns the address. Signing is free and is not a transaction.</div>
     </div>
   </section>
 
@@ -1075,6 +1084,10 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     pollChat();
     if (!chatTimer) chatTimer = setInterval(pollChat, 2000);
   }
+  $('chatToggle').addEventListener('click', function () {
+    var box = $('chatCard'), min = box.classList.toggle('min');
+    $('chatToggle').setAttribute('aria-expanded', min ? 'false' : 'true');
+  });
   $('chatForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var inp = $('chatInput'), text = inp.value.trim();
