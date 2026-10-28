@@ -1,0 +1,1318 @@
+<title>Bedrock Bots</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Pixelify+Sans:wght@500;700&display=swap">
+<style>
+/* Layout: a lamp-lit coal mine control room. The cave is the hero; a narrow side column holds the pool, your share, the miners and a log. Single dark look by design. */
+:root {
+  --bg: #0A090F;
+  --panel: #131119;
+  --panel-2: #1C1925;
+  --line: #2B2638;
+  --fg: #ECE8F4;
+  --muted: #A29BB8;
+  --accent: #A394FF;
+  --on-accent: #0A090F;
+  --gold: #F5B83A;
+  --ember: #FF8A3D;
+  --good: #5CD08A;
+  --font-display: 'Pixelify Sans', 'Courier New', monospace;
+  --font-body: 'Figtree', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding-bottom: 20px; }
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.logo { width: 34px; height: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; flex: none; }
+.logo i { display: block; }
+.logo i:nth-child(1) { background: #5B5650; }
+.logo i:nth-child(2) { background: #25252A; }
+.logo i:nth-child(3) { background: #25252A; }
+.logo i:nth-child(4) { background: #F5B83A; }
+h1 { margin: 0; font: 700 30px/1 var(--font-display); letter-spacing: 0.01em; text-wrap: balance; }
+.sub { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+
+.chip { display: inline-flex; align-items: center; gap: 8px; font: 500 13px var(--font-mono); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); min-height: 32px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.chip.on .dot { background: var(--good); }
+
+.stage { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.sandbox { flex: 1 1 560px; min-width: 0; }
+.side { flex: 1 1 300px; min-width: 0; max-width: 420px; display: flex; flex-direction: column; gap: 16px; }
+@media (max-width: 900px) { .side { max-width: none; } }
+
+.view { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 11; border: 2px solid var(--line); border-radius: 6px; overflow: hidden; background: #07060B; }
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+canvas:active { cursor: grabbing; }
+.hint, .lvl { position: absolute; font: 500 12px var(--font-mono); color: #E9E5F2; background: rgba(8, 7, 12, 0.72); padding: 5px 10px; border-radius: 999px; pointer-events: none; max-width: calc(100% - 20px); }
+.hint { left: 10px; bottom: 10px; }
+.lvl { left: 10px; top: 10px; color: var(--gold); font-weight: 500; }
+.pop { position: absolute; transform: translate(-50%, -50%); pointer-events: none; font: 700 22px var(--font-display); color: #FFD25A; text-shadow: 0 2px 0 #1A1405, 2px 0 0 #1A1405, -2px 0 0 #1A1405, 0 -2px 0 #1A1405; animation: rise 1.7s ease-out forwards; white-space: nowrap; }
+.pop.sim { font-size: 16px; color: #E8C98E; }
+@keyframes rise { 0% { opacity: 0; transform: translate(-50%, -30%) scale(0.7); } 12% { opacity: 1; transform: translate(-50%, -60%) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, -260%) scale(1); } }
+@media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
+.gate { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(6, 5, 10, 0.62); }
+.gate[hidden] { display: none; }
+.gate-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
+.gate-card h2 { margin: 0; font: 700 24px/1.1 var(--font-display); }
+.gate-card p { margin: 0; color: var(--muted); font-size: 15px; }
+.gate-card .msg { color: var(--fg); background: var(--panel-2); border-radius: 6px; padding: 8px 10px; font-size: 14px; }
+.gate-card a { color: var(--accent); font-weight: 600; }
+
+.btn { font: 600 15px var(--font-body); min-height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
+.btn[hidden] { display: none; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--line); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--panel-2); border-color: var(--accent); }
+.btn-sm { min-height: 40px; padding: 0 14px; font-size: 14px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.fine { margin: 12px 0 0; color: var(--muted); font-size: 14px; max-width: 70ch; }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.lbl { font: 500 12px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.name { font: 700 20px/1.1 var(--font-display); }
+.status { font: 500 13px var(--font-mono); color: var(--muted); }
+.fees { font: 700 52px/1 var(--font-display); color: var(--gold); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.unit { font: 500 13px var(--font-mono); color: var(--muted); }
+.pool { font: 700 34px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.bar { height: 10px; border-radius: 2px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 100%; background: var(--ember); transition: width 0.4s ease; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.stats div { min-width: 0; }
+.stats dt { font: 500 11px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.stats dd { margin: 2px 0 0; font: 700 22px/1.1 var(--font-display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.miners { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.miners li { display: flex; align-items: center; gap: 10px; font-size: 15px; min-width: 0; }
+.miners .swatch { width: 12px; height: 12px; flex: none; border: 1px solid rgba(255, 255, 255, 0.25); }
+.miners .mn { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.miners .ml { font: 500 12px var(--font-mono); color: var(--muted); }
+.miners .ma { font: 500 14px var(--font-mono); color: var(--gold); font-variant-numeric: tabular-nums; }
+.miners li.empty { color: var(--muted); }
+
+.log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-height: 120px; }
+.log li { display: flex; gap: 10px; font-size: 14px; align-items: baseline; }
+.log .t { font: 400 12px var(--font-mono); color: var(--muted); flex: none; }
+.log li.win { color: var(--gold); font-weight: 600; }
+.log li.sim { color: var(--muted); }
+.log li.empty { color: var(--muted); }
+
+footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <div>
+        <h1>Bedrock Bots</h1>
+        <p class="sub">Hold <span data-ticker></span>, send a miner underground, and watch it dig deeper.</p>
+      </div>
+    </div>
+    <div class="chip" id="walletChip"><span class="dot"></span><span id="walletAddr">Not connected</span></div>
+  </header>
+
+  <div class="stage">
+    <section class="sandbox" aria-label="Coal mine">
+      <div class="view" id="view">
+        <canvas id="world" tabindex="0" aria-label="3D view of a four-level coal mine with miners digging into the walls and down through the floor. Drag to rotate, shift-drag or right-drag to pan, scroll or pinch to zoom. Arrow keys rotate, plus and minus zoom."></canvas>
+        <div class="lvl" id="lvlTag">Level 1 of 4</div>
+        <div class="hint">Drag to rotate &middot; Shift-drag or two fingers to pan &middot; Scroll or pinch to zoom</div>
+        <div class="gate" id="gate">
+          <div class="gate-card">
+            <h2>Enter the mine</h2>
+            <p id="gateTxt">Connect your Phantom wallet and a miner lowers into the cave to start digging.</p>
+            <button class="btn btn-primary" id="connectBtn" type="button">Connect Phantom</button>
+            <button class="btn btn-ghost" id="demoBtn" type="button">Try demo mode</button>
+            <p class="msg" id="msg" role="status" hidden></p>
+            <a id="installLink" href="https://phantom.app/" target="_blank" rel="noopener" hidden>Get Phantom</a>
+          </div>
+        </div>
+      </div>
+      <p class="fine">Connecting shares your public address only. This page never asks you to sign or approve anything.</p>
+    </section>
+
+    <aside class="side" aria-label="Mine dashboard">
+      <div class="card">
+        <div class="row">
+          <span class="name" id="botName">No miner yet</span>
+          <span class="status" id="status">Idle</span>
+        </div>
+        <div class="unit">Holder check is off in this demo, so any wallet can send a miner in.</div>
+      </div>
+
+      <div class="card">
+        <span class="lbl" id="poolLbl">Prize pool (simulated)</span>
+        <div class="row"><span class="pool" id="poolLeft">$10.00</span><span class="unit" id="poolMeta">of $10.00</span></div>
+        <div class="bar" aria-hidden="true"><i id="poolBar"></i></div>
+        <div class="unit" id="poolBlocks">60 hidden rewards left</div>
+      </div>
+
+      <div class="card" id="devCard" hidden>
+        <span class="lbl">Devnet reward wallet</span>
+        <div class="unit" id="devAddr" style="font-family: var(--font-mono); overflow-wrap: anywhere; color: var(--fg)"></div>
+        <div class="row"><span class="unit">Balance</span><span id="devBal" style="font: 500 14px var(--font-mono); color: var(--gold)">...</span></div>
+        <div class="controls">
+          <button class="btn btn-ghost btn-sm" id="copyAddr" type="button">Copy address</button>
+          <button class="btn btn-ghost btn-sm" id="newPoolBtn" type="button">New pool</button>
+        </div>
+        <div class="unit" id="devNote"></div>
+      </div>
+
+      <div class="card">
+        <span class="lbl" id="shareLbl">Your share (simulated)</span>
+        <div class="fees" id="fees">$0.00</div>
+        <dl class="stats">
+          <div><dt>Blocks</dt><dd id="sBlocks">0</dd></div>
+          <div><dt>Rewards</dt><dd id="sRewards">0</dd></div>
+          <div><dt>Best find</dt><dd id="sBest">$0.00</dd></div>
+        </dl>
+        <div class="controls">
+          <button class="btn btn-ghost btn-sm" id="speed1" type="button" aria-pressed="true">1&times; speed</button>
+          <button class="btn btn-ghost btn-sm" id="speed3" type="button" aria-pressed="false">3&times; speed</button>
+          <button class="btn btn-ghost btn-sm" id="resetBtn" type="button">Reset share</button>
+          <button class="btn btn-ghost btn-sm" id="leaveBtn" type="button" hidden>Leave</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <span class="lbl">Camera</span>
+        <div class="controls">
+          <button class="btn btn-ghost btn-sm" id="followBtn" type="button" aria-pressed="true">Follow miner</button>
+          <button class="btn btn-ghost btn-sm" id="chaseBtn" type="button" aria-pressed="false">Chase view</button>
+          <button class="btn btn-ghost btn-sm" id="viewBtn" type="button">Reset view</button>
+        </div>
+        <span class="lbl">View level</span>
+        <div class="controls" id="lvlBtns">
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="auto" aria-pressed="true">Auto</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="0" aria-pressed="false">1</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="1" aria-pressed="false">2</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="2" aria-pressed="false">3</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-lv="3" aria-pressed="false">4</button>
+        </div>
+        <div class="unit">Levels above the one you view are cut away. Deeper levels hold bigger rewards.</div>
+      </div>
+
+      <div class="card">
+        <span class="lbl">Miners underground</span>
+        <ul class="miners" id="miners"><li class="empty">No miners yet.</li></ul>
+        <div class="controls">
+          <button class="btn btn-ghost btn-sm" id="addSim" type="button" disabled>Add simulated miner</button>
+          <button class="btn btn-ghost btn-sm" id="clearSims" type="button" disabled>Remove simulated</button>
+        </div>
+        <div class="unit">Simulated miners stand in for other wallets. Real multi-wallet play needs a game server, which this demo does not have.</div>
+      </div>
+
+      <div class="card">
+        <span class="lbl">Activity</span>
+        <ul class="log" id="log"><li class="empty">Nothing yet. Enter the mine to start digging.</li></ul>
+      </div>
+    </aside>
+  </div>
+
+  <footer id="foot">
+    The pool, fees and miners here are simulated game points stored in this browser. Nothing is paid out, and no token is sent or received. A game demo for <span data-ticker></span>.
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // Change this to your ticker. It appears in the header and footer.
+  var TICKER = '$BEDROCK';
+  var DEV = null;   // set when this page is served by server.js (devnet mode)
+
+  // The mine: LV stacked levels, each X by Z cells. Wall cells are tall rock pillars (height PH) standing on a floor slab (thickness FT).
+  // Digging a floor slab opens a shaft down to the next level.
+  var X = 36, Z = 26, N = X * Z, LV = 4, NN = LV * N, PH = 2.0, FT = 1.0, LH = PH + FT;
+  var HIT_TIME = 0.35, WALK_SPEED = 2.6, FHARD = 3;
+  // The pool is split into this many hidden reward blocks across all levels. Amounts are in cents.
+  var POOL_TOTAL = 1000, REWARD_BLOCKS = 60;
+  // Wall types: 1 rock, 2 deep rock, 3 coal, 5 edge rock (cannot be mined).
+  var HARD = [0, 3, 4, 2, 0, 999];
+  var NAMES = ['', 'Rock', 'Deep rock', 'Coal', '', 'Edge rock'];
+  var SLOTS = 4, SIM_HUES = [24, 160, 300], SIM_NAMES = ['Sim A', 'Sim B', 'Sim C'];
+  var FOV = 42, LANTERN_LEVELS = [0, 0, 1, 1, 2, 3, 3];
+
+  function $(id) { return document.getElementById(id); }
+  var canvas = $('world'), view = $('view');
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ticker]'), function (el) { el.textContent = TICKER; });
+
+  function fmt(c) { return DEV ? (c / 1e9).toFixed(4) + ' SOL' : '$' + (c / 100).toFixed(2); }
+  function showMsg(text, withInstall) {
+    var m = $('msg'); m.textContent = text; m.hidden = false;
+    $('installLink').hidden = !withInstall;
+  }
+  function fail(text) {
+    $('gate').hidden = false; $('connectBtn').hidden = true; $('demoBtn').hidden = true;
+    showMsg(text, false);
+  }
+  if (!window.THREE) { fail('The 3D engine did not load. Check your connection and reload the page.'); return; }
+  var renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  } catch (err) { fail('This browser could not start 3D graphics (WebGL).'); return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  function mulberry(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function box(w, h, d, m) { return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); }
+  function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = (Math.random() * (i + 1)) | 0, tmp = a[i]; a[i] = a[j]; a[j] = tmp; } return a; }
+
+  // Node index g = level * N + cell. Helpers to take it apart.
+  function baseY(l) { return -l * LH; }
+  function gl(g) { return (g / N) | 0; }
+  function gx(g) { return (g % N) % X; }
+  function gz(g) { return (((g % N) / X) | 0); }
+  function wxg(g) { return gx(g) - X / 2 + 0.5; }
+  function wzg(g) { return gz(g) - Z / 2 + 0.5; }
+  var DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  /* ---------- scene ---------- */
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x07060B);
+  scene.fog = new THREE.FogExp2(0x07060B, 0.014);
+  var camera = new THREE.PerspectiveCamera(FOV, 16 / 11, 0.1, 220);
+  scene.add(new THREE.AmbientLight(0x8d86a8, 0.5));
+  var moon = new THREE.DirectionalLight(0xa9b6ff, 0.32); moon.position.set(5, 14, 4); scene.add(moon);
+
+  /* ---------- textures ---------- */
+  var PAL = {
+    floor: ['#3A2F26', '#33291F', '#403429', '#2C231B'],
+    1: ['#5B5650', '#524E48', '#645F58', '#47433E'],
+    2: ['#3F3C3A', '#383533', '#47443F', '#2F2D2B'],
+    3: ['#25252A', '#1D1D22', '#2E2E34', '#16161A'],
+    5: ['#17161A', '#121115', '#1C1B20', '#0D0D10']
+  };
+  function texCanvas(kind) {
+    var c = document.createElement('canvas'); c.width = c.height = 16;
+    var g = c.getContext('2d'), seed = kind === 'floor' ? 3 : +kind, rnd = mulberry(seed * 977 + 13), x, y, i;
+    var p = PAL[kind];
+    for (y = 0; y < 16; y++) for (x = 0; x < 16; x++) { g.fillStyle = p[(rnd() * 4) | 0]; g.fillRect(x, y, 1, 1); }
+    if (kind === 3) {
+      for (i = 0; i < 7; i++) { g.fillStyle = '#6B6E78'; g.fillRect((rnd() * 15) | 0, (rnd() * 15) | 0, 1, 1); }
+      for (i = 0; i < 3; i++) { g.fillStyle = '#A3A9B8'; g.fillRect((rnd() * 15) | 0, (rnd() * 15) | 0, 1, 1); }
+    } else if (kind === 'floor') {
+      for (i = 0; i < 5; i++) { g.fillStyle = '#54483B'; g.fillRect((rnd() * 14) | 0, (rnd() * 14) | 0, 2, 1); }
+    } else {
+      g.fillStyle = 'rgba(0,0,0,0.3)';
+      for (i = 0; i < 6; i++) g.fillRect((rnd() * 14) | 0, (rnd() * 15) | 0, 2 + ((rnd() * 3) | 0), 1);
+    }
+    g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(0, 15, 16, 1); g.fillRect(15, 0, 1, 16);
+    g.fillStyle = 'rgba(255,255,255,0.05)'; g.fillRect(0, 0, 16, 1); g.fillRect(0, 0, 1, 16);
+    return c;
+  }
+  function mat(kind, rx, ry) {
+    var tx = new THREE.CanvasTexture(texCanvas(kind));
+    tx.magFilter = THREE.NearestFilter; tx.minFilter = THREE.NearestFilter; tx.generateMipmaps = false;
+    tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(rx, ry);
+    // Phong lights per pixel, so lantern light pools on the floor and walls instead of smearing across big faces.
+    return new THREE.MeshPhongMaterial({ map: tx, shininess: 0, specular: 0x000000 });
+  }
+
+  /* ---------- mine data ---------- */
+  var grid = new Uint8Array(NN), btype = new Uint8Array(NN), dmg = new Uint8Array(NN), rew = new Int32Array(NN), inst = new Int32Array(NN);
+  var ys = new Float32Array(NN).fill(1);
+  var fgrid = new Uint8Array(NN), fdmg = new Uint8Array(NN), frew = new Int32Array(NN);   // floor slabs: 1 intact, 0 dug out, 2 unbreakable
+  var claim = new Uint8Array(2 * NN);   // wall targets use g, floor targets use NN + g
+  var openByLevel = [[], [], [], []], spawnCells = [0, 0, 0, 0];
+
+  var pillarGeo = new THREE.BoxGeometry(1, PH, 1), floorGeo = new THREE.BoxGeometry(1, FT, 1);
+  var pillarMats = {}, pillars = [], floors = [];
+  [1, 2, 3, 5].forEach(function (t) { pillarMats[t] = mat(t, 1, 2); });
+  var floorMat = mat('floor', 1, 1);
+  (function () {
+    for (var l = 0; l < LV; l++) {
+      var per = [null];
+      for (var t = 1; t <= 5; t++) {
+        if (t === 4) { per.push(null); continue; }
+        var im = new THREE.InstancedMesh(pillarGeo, pillarMats[t], N);
+        im.frustumCulled = false; im.setColorAt(0, new THREE.Color(1, 1, 1)); im.count = 0;
+        scene.add(im); per.push(im);
+      }
+      pillars.push(per);
+      var fm = new THREE.InstancedMesh(floorGeo, floorMat, N);
+      fm.frustumCulled = false; fm.setColorAt(0, new THREE.Color(1, 1, 1)); fm.count = N;
+      scene.add(fm); floors.push(fm);
+    }
+  })();
+
+  // Cavern roof: faces down, so it is invisible from above and shows only when you look up from inside a level.
+  var ceilings = [], stalac = [], stalGeo = new THREE.ConeGeometry(0.2, 0.8, 5), stalMat = mat(2, 1, 1);
+  stalGeo.rotateX(Math.PI);
+  (function () {
+    for (var l = 0; l < LV; l++) {
+      var cg = new THREE.PlaneGeometry(X, Z); cg.rotateX(Math.PI / 2);
+      var c = new THREE.Mesh(cg, mat(2, X / 2, Z / 2));
+      c.position.set(0, baseY(l) + PH - 0.02, 0); scene.add(c); ceilings.push(c);
+      var sm = new THREE.InstancedMesh(stalGeo, stalMat, 24);
+      sm.frustumCulled = false; sm.count = 0; scene.add(sm); stalac.push(sm);
+    }
+  })();
+
+  var mtx = new THREE.Matrix4(), vPos = new THREE.Vector3(), vScale = new THREE.Vector3(1, 1, 1), qId = new THREE.Quaternion(), tmpCol = new THREE.Color();
+  function setBlock(g, sx, sy) {
+    var l = gl(g);
+    vPos.set(wxg(g), baseY(l) + PH * sy / 2, wzg(g)); vScale.set(sx, sy, sx);
+    mtx.compose(vPos, qId, vScale);
+    var m = pillars[l][btype[g]];
+    m.setMatrixAt(inst[g], mtx); m.instanceMatrix.needsUpdate = true;
+  }
+  function shadeBlock(g) {
+    var v = 1 - 0.55 * dmg[g] / HARD[btype[g]], m = pillars[gl(g)][btype[g]];
+    tmpCol.setRGB(v, v, v); m.setColorAt(inst[g], tmpCol); m.instanceColor.needsUpdate = true;
+  }
+  function setFloor(g, s) {
+    var l = gl(g);
+    vPos.set(wxg(g), baseY(l) - FT / 2, wzg(g)); vScale.set(s, s, s);
+    mtx.compose(vPos, qId, vScale);
+    floors[l].setMatrixAt(g % N, mtx); floors[l].instanceMatrix.needsUpdate = true;
+  }
+  function shadeFloor(g) {
+    var v = 1 - 0.5 * fdmg[g] / FHARD, m = floors[gl(g)];
+    tmpCol.setRGB(v, v, v); m.setColorAt(g % N, tmpCol); m.instanceColor.needsUpdate = true;
+  }
+
+  // Cave generation: random fill, smooth with a cellular rule, keep the biggest connected cavern.
+  function genCave() {
+    var tries = 0;
+    for (;;) {
+      tries++;
+      var open = new Uint8Array(N), i, x, z, it;
+      for (z = 0; z < Z; z++) for (x = 0; x < X; x++) {
+        open[z * X + x] = (x === 0 || z === 0 || x === X - 1 || z === Z - 1) ? 0 : (Math.random() < 0.55 ? 1 : 0);
+      }
+      for (it = 0; it < 4; it++) {
+        var nxt = new Uint8Array(N);
+        for (z = 1; z < Z - 1; z++) for (x = 1; x < X - 1; x++) {
+          var w = 0;
+          for (var dz = -1; dz <= 1; dz++) for (var dx = -1; dx <= 1; dx++) {
+            var ox = x + dx, oz = z + dz;
+            if (ox < 0 || oz < 0 || ox >= X || oz >= Z || !open[oz * X + ox]) w++;
+          }
+          nxt[z * X + x] = w >= 5 ? 0 : 1;
+        }
+        open = nxt;
+      }
+      var comp = new Int16Array(N).fill(-1), best = -1, bestSize = 0, cid = 0, q = new Int32Array(N);
+      for (i = 0; i < N; i++) {
+        if (!open[i] || comp[i] >= 0) continue;
+        var qh = 0, qt = 0, size = 0;
+        q[qt++] = i; comp[i] = cid;
+        while (qh < qt) {
+          var c = q[qh++]; size++;
+          var cxx = c % X, czz = (c / X) | 0;
+          var nb = [cxx > 0 ? c - 1 : -1, cxx < X - 1 ? c + 1 : -1, czz > 0 ? c - X : -1, czz < Z - 1 ? c + X : -1];
+          for (var d = 0; d < 4; d++) { var n2 = nb[d]; if (n2 >= 0 && open[n2] && comp[n2] < 0) { comp[n2] = cid; q[qt++] = n2; } }
+        }
+        if (size > bestSize) { bestSize = size; best = cid; }
+        cid++;
+      }
+      if (bestSize < 280 && tries < 30) continue;
+      for (i = 0; i < N; i++) if (open[i] && comp[i] !== best) open[i] = 0;
+      return open;
+    }
+  }
+
+  var rewardsLeft = 0, poolLeft = 0;
+  function buildRewards() {
+    if (DEV) { rew.fill(0); frew.fill(0); rewardsLeft = DEV.rewardsLeft; poolLeft = DEV.poolLeft; return; }
+    var slots = [], g, k;   // [kind, g]: kind 0 = inside a wall, 1 = inside a floor slab
+    for (g = 0; g < NN; g++) {
+      if (grid[g] >= 1 && grid[g] <= 3) slots.push([0, g]);
+      if (fgrid[g] === 1) slots.push([1, g]);
+    }
+    shuffle(slots);
+    var n = Math.min(REWARD_BLOCKS, slots.length), w = [], sum = 0, cents = [], tot = 0, big = 0;
+    // Deeper levels hold bigger shares.
+    for (k = 0; k < n; k++) { var r = Math.random(); w[k] = (0.25 + r * r * 3) * (1 + 0.55 * gl(slots[k][1])); sum += w[k]; }
+    for (k = 0; k < n; k++) {
+      cents[k] = Math.max(5, Math.round(w[k] / sum * POOL_TOTAL));
+      tot += cents[k];
+      if (cents[k] > cents[big]) big = k;
+    }
+    cents[big] += POOL_TOTAL - tot;
+    for (k = 0; k < n; k++) { if (slots[k][0] === 0) rew[slots[k][1]] = cents[k]; else frew[slots[k][1]] = cents[k]; }
+    rewardsLeft = n; poolLeft = POOL_TOTAL;
+  }
+
+  /* ---------- decor: lanterns and timber supports ---------- */
+  var lanterns = [];
+  for (var lk = 0; lk < LANTERN_LEVELS.length; lk++) {
+    var lg = new THREE.Group();
+    var lpost = box(0.1, 0.9, 0.1, new THREE.MeshLambertMaterial({ color: 0x4a3320 })); lpost.position.y = 0.45; lg.add(lpost);
+    var lamp = box(0.2, 0.24, 0.2, new THREE.MeshBasicMaterial({ color: 0xFFB45A })); lamp.position.y = 1.0; lg.add(lamp);
+    var lL = new THREE.PointLight(0xffa24a, 0, 10);
+    lg.visible = false; scene.add(lg); scene.add(lL);
+    lanterns.push({ g: lg, lamp: lamp, L: lL, on: false, level: LANTERN_LEVELS[lk] });
+  }
+  var timberMat = new THREE.MeshLambertMaterial({ color: 0x5a3b22 });
+  var postGeo = new THREE.BoxGeometry(0.14, 1.9, 0.14), beamGeo = new THREE.BoxGeometry(1.1, 0.16, 0.2);
+  var supportsG = [];
+  for (var sl = 0; sl < LV; sl++) { var sg = new THREE.Group(); scene.add(sg); supportsG.push(sg); }
+  function isWallL(l, x, z) { return x < 0 || z < 0 || x >= X || z >= Z || grid[l * N + z * X + x] !== 0; }
+  function placeDecor() {
+    var l, k, used = [[], [], [], []];
+    lanterns.forEach(function (ln) {
+      var lv = ln.level, cand = shuffle(openByLevel[lv].slice()), placed = false;
+      for (k = 0; k < cand.length; k++) {
+        var c = cand[k], x = c % X, z = (c / X) | 0, wd = -1, d;
+        for (d = 0; d < 4; d++) if (isWallL(lv, x + DIRS[d][0], z + DIRS[d][1])) { wd = d; break; }
+        if (wd < 0) continue;
+        var far = true;
+        for (var j = 0; j < used[lv].length; j++) if (Math.abs(used[lv][j].x - x) + Math.abs(used[lv][j].z - z) < 6) { far = false; break; }
+        if (!far) continue;
+        used[lv].push({ x: x, z: z });
+        var px = x - X / 2 + 0.5 + DIRS[wd][0] * 0.36, pz = z - Z / 2 + 0.5 + DIRS[wd][1] * 0.36;
+        ln.g.position.set(px, baseY(lv), pz); ln.L.position.set(px, baseY(lv) + 1.15, pz);
+        placed = true; break;
+      }
+      ln.on = placed;
+    });
+    for (l = 0; l < LV; l++) {
+      var sm2 = stalac[l], sc = shuffle(openByLevel[l].slice()), sn = Math.min(24, sc.length), si;
+      for (si = 0; si < sn; si++) {
+        var cc = sc[si], sz = 0.6 + Math.random() * 0.9;
+        vPos.set(cc % X - X / 2 + 0.5 + (Math.random() - 0.5) * 0.6, baseY(l) + PH - 0.4 * sz, ((cc / X) | 0) - Z / 2 + 0.5 + (Math.random() - 0.5) * 0.6);
+        vScale.set(sz, sz, sz); mtx.compose(vPos, qId, vScale); sm2.setMatrixAt(si, mtx);
+      }
+      sm2.count = sn; sm2.instanceMatrix.needsUpdate = true; vScale.set(1, 1, 1);
+      var sg2 = supportsG[l];
+      while (sg2.children.length) sg2.remove(sg2.children[0]);
+      var made = [], tries = shuffle(openByLevel[l].slice());
+      for (k = 0; k < tries.length && made.length < 5; k++) {
+        var c2 = tries[k], x2 = c2 % X, z2 = (c2 / X) | 0;
+        var ew = isWallL(l, x2 + 1, z2) && isWallL(l, x2 - 1, z2) && !isWallL(l, x2, z2 + 1) && !isWallL(l, x2, z2 - 1);
+        var ns = isWallL(l, x2, z2 + 1) && isWallL(l, x2, z2 - 1) && !isWallL(l, x2 + 1, z2) && !isWallL(l, x2 - 1, z2);
+        if (!ew && !ns) continue;
+        var near = false;
+        for (var m = 0; m < made.length; m++) if (Math.abs(made[m][0] - x2) + Math.abs(made[m][1] - z2) < 3) { near = true; break; }
+        if (near) continue;
+        made.push([x2, z2]);
+        var bx = x2 - X / 2 + 0.5, bz = z2 - Z / 2 + 0.5, by = baseY(l);
+        var beam = new THREE.Mesh(beamGeo, timberMat); beam.position.set(bx, by + 1.88, bz);
+        var pa = new THREE.Mesh(postGeo, timberMat), pb = new THREE.Mesh(postGeo, timberMat);
+        if (ew) { pa.position.set(bx - 0.42, by + 0.95, bz); pb.position.set(bx + 0.42, by + 0.95, bz); }
+        else { beam.rotation.y = Math.PI / 2; pa.position.set(bx, by + 0.95, bz - 0.42); pb.position.set(bx, by + 0.95, bz + 0.42); }
+        sg2.add(beam); sg2.add(pa); sg2.add(pb);
+      }
+    }
+  }
+
+  var lowered = {};
+  function newWorld() {
+    var l, i, g, x, z;
+    claim.fill(0); ys.fill(1); lowered = {};
+    var counts = [];
+    for (l = 0; l < LV; l++) {
+      var open = genCave(), base = l * N, thr = Math.max(2, 4 - l);
+      var dist = new Int16Array(N).fill(-1), q = new Int32Array(N), qh = 0, qt = 0;
+      openByLevel[l] = [];
+      for (i = 0; i < N; i++) if (open[i]) { dist[i] = 0; q[qt++] = i; openByLevel[l].push(i); }
+      while (qh < qt) {
+        var c = q[qh++], c0 = c % X, c1 = (c / X) | 0;
+        var nb = [c0 > 0 ? c - 1 : -1, c0 < X - 1 ? c + 1 : -1, c1 > 0 ? c - X : -1, c1 < Z - 1 ? c + X : -1];
+        for (var d = 0; d < 4; d++) { var n2 = nb[d]; if (n2 >= 0 && dist[n2] < 0) { dist[n2] = dist[c] + 1; q[qt++] = n2; } }
+      }
+      counts[l] = [0, 0, 0, 0, 0, 0];
+      for (i = 0; i < N; i++) {
+        x = i % X; z = (i / X) | 0; g = base + i;
+        var edge = x === 0 || z === 0 || x === X - 1 || z === Z - 1, t;
+        if (open[i]) t = 0;
+        else if (edge) t = 5;
+        else if (dist[i] >= thr) t = 2;
+        else t = Math.random() < 0.16 + 0.03 * l ? 3 : 1;
+        btype[g] = t; grid[g] = t; dmg[g] = 0; rew[g] = 0;
+        if (t) inst[g] = counts[l][t]++;
+        fgrid[g] = l === LV - 1 ? 2 : 1; fdmg[g] = 0; frew[g] = 0;
+      }
+      [1, 2, 3, 5].forEach(function (tt) { pillars[l][tt].count = counts[l][tt]; });
+    }
+    for (g = 0; g < NN; g++) {
+      if (btype[g]) { setBlock(g, 1, 1); shadeBlock(g); }
+      setFloor(g, 1); shadeFloor(g);
+    }
+    buildRewards();
+    var cand = shuffle(openByLevel[0].slice()), picks = [];
+    for (i = 0; i < cand.length && picks.length < SLOTS; i++) {
+      var ok = true;
+      for (var j = 0; j < picks.length; j++) if (Math.abs(picks[j] % X - cand[i] % X) + Math.abs(((picks[j] / X) | 0) - ((cand[i] / X) | 0)) < 5) { ok = false; break; }
+      if (ok) picks.push(cand[i]);
+    }
+    for (i = 0; picks.length < SLOTS; i++) picks.push(cand[i % cand.length]);
+    spawnCells = picks;
+    placeDecor();
+    updatePool();
+    lastFocus = -1;
+  }
+
+  /* ---------- miner rigs (fixed number so the light count never changes) ---------- */
+  function makeRig() {
+    var g = new THREE.Group(), body = new THREE.Group(); g.add(body);
+    var skin = new THREE.MeshLambertMaterial({ color: 0xD9A67A });
+    var cloth = new THREE.MeshLambertMaterial({ color: 0x8899ff });
+    var dark = new THREE.MeshLambertMaterial({ color: 0x2a2630 });
+    var helm = new THREE.MeshLambertMaterial({ color: 0xF2C230 });
+    var legL = new THREE.Group(), legR = new THREE.Group();
+    legL.position.set(-0.1, 0.4, 0); legR.position.set(0.1, 0.4, 0);
+    var lGeo = box(0.14, 0.4, 0.14, dark); lGeo.position.y = -0.2; legL.add(lGeo);
+    var rGeo = box(0.14, 0.4, 0.14, dark); rGeo.position.y = -0.2; legR.add(rGeo);
+    body.add(legL); body.add(legR);
+    var torso = box(0.38, 0.4, 0.22, cloth); torso.position.y = 0.6; body.add(torso);
+    var head = box(0.24, 0.24, 0.24, skin); head.position.y = 0.93; body.add(head);
+    var helmet = box(0.31, 0.12, 0.31, helm); helmet.position.y = 1.08; body.add(helmet);
+    var brim = box(0.31, 0.04, 0.12, helm); brim.position.set(0, 1.03, 0.17); body.add(brim);
+    var lampM = box(0.1, 0.08, 0.05, new THREE.MeshBasicMaterial({ color: 0xFFF3C9 })); lampM.position.set(0, 1.09, 0.19); body.add(lampM);
+    var eyeM = new THREE.MeshBasicMaterial({ color: 0x1a1620 });
+    var e1 = box(0.04, 0.04, 0.02, eyeM); e1.position.set(-0.06, 0.95, 0.125); body.add(e1);
+    var e2 = box(0.04, 0.04, 0.02, eyeM); e2.position.set(0.06, 0.95, 0.125); body.add(e2);
+    var armL = new THREE.Group(); armL.position.set(-0.24, 0.78, 0);
+    var aGeo = box(0.09, 0.32, 0.09, cloth); aGeo.position.y = -0.16; armL.add(aGeo); body.add(armL);
+    var tool = new THREE.Group(); tool.position.set(0.24, 0.78, 0.04); body.add(tool);
+    var swingG = new THREE.Group(); tool.add(swingG);
+    var arm = box(0.09, 0.09, 0.3, cloth); arm.position.z = 0.12; swingG.add(arm);
+    var stick = box(0.06, 0.06, 0.62, new THREE.MeshLambertMaterial({ color: 0x8B5A2B })); stick.position.z = 0.34; swingG.add(stick);
+    var pick = box(0.36, 0.07, 0.07, new THREE.MeshLambertMaterial({ color: 0x9CA2AE })); pick.position.z = 0.66; swingG.add(pick);
+    var light = new THREE.PointLight(0xfff0c8, 0, 8);
+    g.visible = false; scene.add(g); scene.add(light);
+    return { g: g, body: body, legL: legL, legR: legR, armL: armL, tool: tool, swingG: swingG, cloth: cloth, light: light };
+  }
+  var rigs = [];
+  for (var rk = 0; rk < SLOTS; rk++) rigs.push(makeRig());
+  var marker = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.43, 28), new THREE.MeshBasicMaterial({ color: 0xA394FF, side: THREE.DoubleSide }));
+  marker.rotation.x = -Math.PI / 2; marker.visible = false; scene.add(marker);
+  var flash = new THREE.PointLight(0xffd25a, 0, 9); scene.add(flash);
+  var flashT = 0;
+
+  /* ---------- particles ---------- */
+  var pool = [], pIdx = 0, pGeo = new THREE.BoxGeometry(1, 1, 1);
+  for (var pi = 0; pi < 220; pi++) {
+    var pm = new THREE.Mesh(pGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
+    pm.visible = false; scene.add(pm);
+    pool.push({ m: pm, vx: 0, vy: 0, vz: 0, life: 0, max: 1, s: 0.12, fy: 0 });
+  }
+  function emit(x, y, z, color, n, power, size, life) {
+    if (reduceMotion) n = Math.ceil(n / 2);
+    var fy = baseY(clamp(Math.round(-y / LH), 0, LV - 1));
+    for (var k = 0; k < n; k++) {
+      var p = pool[pIdx]; pIdx = (pIdx + 1) % pool.length;
+      p.m.position.set(x + (Math.random() - 0.5) * 0.4, y + (Math.random() - 0.5) * 0.4, z + (Math.random() - 0.5) * 0.4);
+      p.vx = (Math.random() - 0.5) * power; p.vy = Math.random() * power * 0.9; p.vz = (Math.random() - 0.5) * power;
+      p.life = p.max = life * (0.7 + Math.random() * 0.5); p.s = size * (0.7 + Math.random() * 0.6); p.fy = fy;
+      p.m.material.color.set(Array.isArray(color) ? color[(Math.random() * color.length) | 0] : color);
+      p.m.visible = true;
+    }
+  }
+  function stepParticles(dt) {
+    for (var k = 0; k < pool.length; k++) {
+      var p = pool[k];
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      if (p.life <= 0) { p.m.visible = false; continue; }
+      p.vy -= 9 * dt;
+      p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+      if (p.m.position.y < p.fy + 0.04) { p.m.position.y = p.fy + 0.04; p.vy = 0; p.vx *= 0.8; p.vz *= 0.8; }
+      var f = p.life / p.max;
+      p.m.scale.setScalar(p.s * (0.35 + 0.65 * f));
+      p.m.material.opacity = Math.min(1, f * 1.6);
+    }
+    if (flashT > 0) { flashT -= dt; flash.intensity = Math.max(0, flashT) * 7; } else flash.intensity = 0;
+  }
+  function pop(text, x, y, z, cls) {
+    vPos.set(x, y, z).project(camera);
+    var el = document.createElement('div');
+    el.className = 'pop' + (cls ? ' ' + cls : ''); el.textContent = text;
+    el.style.left = ((vPos.x * 0.5 + 0.5) * view.clientWidth) + 'px';
+    el.style.top = ((-vPos.y * 0.5 + 0.5) * view.clientHeight) + 'px';
+    view.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 1800);
+  }
+
+  /* ---------- camera: full orbit around a target, pan, zoom, follow and chase ---------- */
+  var DEF = { theta: 0.35, phi: 0.95, r: 26 };
+  var cam = { theta: DEF.theta, phi: DEF.phi, r: DEF.r, tx: 0, ty: 0.8, tz: 0, follow: true, chase: false };
+  function placeCamera() {
+    var sp = Math.sin(cam.phi), cp = Math.cos(cam.phi);
+    camera.position.set(cam.tx + cam.r * sp * Math.sin(cam.theta), cam.ty + cam.r * cp, cam.tz + cam.r * sp * Math.cos(cam.theta));
+    camera.lookAt(cam.tx, cam.ty, cam.tz);
+  }
+  function syncCamBtns() {
+    $('followBtn').setAttribute('aria-pressed', cam.follow ? 'true' : 'false');
+    $('chaseBtn').setAttribute('aria-pressed', cam.chase ? 'true' : 'false');
+  }
+  function clampPan() { cam.tx = clamp(cam.tx, -X / 2 + 2, X / 2 - 2); cam.tz = clamp(cam.tz, -Z / 2 + 2, Z / 2 - 2); }
+  function rotateBy(dxPx, dyPx) {
+    cam.theta -= dxPx * 0.008;
+    cam.phi = clamp(cam.phi - dyPx * 0.006, 0.2, 1.45);
+    if (cam.chase) { cam.chase = false; syncCamBtns(); }
+  }
+  function panBy(dxPx, dyPx) {
+    var s = 2 * cam.r * Math.tan(FOV * Math.PI / 360) / Math.max(1, view.clientHeight);
+    var fx = -Math.sin(cam.theta), fz = -Math.cos(cam.theta), rx = Math.cos(cam.theta), rz = -Math.sin(cam.theta);
+    var k = s / Math.max(0.25, Math.cos(cam.phi));
+    cam.tx += -rx * dxPx * s + fx * dyPx * k;
+    cam.tz += -rz * dxPx * s + fz * dyPx * k;
+    clampPan();
+    if (cam.follow) { cam.follow = false; syncCamBtns(); }
+  }
+  function resize() {
+    var w = view.clientWidth, h = view.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(view); else window.addEventListener('resize', resize);
+  resize();
+
+  var ptrs = {}, lastPinch = 0, lastMid = null;
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  canvas.addEventListener('pointerdown', function (e) {
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    ptrs[e.pointerId] = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey };
+    lastPinch = 0; lastMid = null;
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    var p = ptrs[e.pointerId];
+    if (!p) return;
+    var keys = Object.keys(ptrs);
+    if (keys.length === 1) {
+      var mx = e.clientX - p.x, my = e.clientY - p.y;
+      if (p.pan) panBy(mx, my); else rotateBy(mx, my);
+      p.x = e.clientX; p.y = e.clientY;
+    } else if (keys.length >= 2) {
+      p.x = e.clientX; p.y = e.clientY;
+      var a = ptrs[keys[0]], b = ptrs[keys[1]];
+      var d = Math.sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+      var mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      if (lastPinch && d > 0) cam.r = clamp(cam.r * lastPinch / d, 10, 55);
+      if (lastMid) panBy(mid.x - lastMid.x, mid.y - lastMid.y);
+      lastPinch = d; lastMid = mid;
+    }
+  });
+  function endPtr(e) { delete ptrs[e.pointerId]; lastPinch = 0; lastMid = null; }
+  canvas.addEventListener('pointerup', endPtr);
+  canvas.addEventListener('pointercancel', endPtr);
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); cam.r = clamp(cam.r * Math.exp(e.deltaY * 0.0012), 10, 55); }, { passive: false });
+  canvas.addEventListener('keydown', function (e) {
+    var k = e.key, used = true, step = e.shiftKey;
+    if (k === 'ArrowLeft') { if (step) panBy(40, 0); else rotateBy(-30, 0); }
+    else if (k === 'ArrowRight') { if (step) panBy(-40, 0); else rotateBy(30, 0); }
+    else if (k === 'ArrowUp') { if (step) panBy(0, 40); else rotateBy(0, 20); }
+    else if (k === 'ArrowDown') { if (step) panBy(0, -40); else rotateBy(0, -20); }
+    else if (k === '+' || k === '=') cam.r = clamp(cam.r * 0.9, 10, 55);
+    else if (k === '-') cam.r = clamp(cam.r * 1.1, 10, 55);
+    else used = false;
+    if (used) e.preventDefault();
+  });
+
+  /* ---------- state ---------- */
+  var session = null, player = null, bots = [], speedMult = 1, t = 0, regenT = 0;
+  var stats = { fees: 0, blocks: 0, rewards: 0, best: 0 };
+  var shown = 0, lastStatus = '', viewLevel = -1, focus = 0, lastFocus = -1;
+
+  function hashStr(s) { var h = 7; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+  function shortAddr(a) { return a.length > 10 ? a.slice(0, 4) + '…' + a.slice(-4) : a; }
+  function timeStr() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+
+  /* ---------- storage ---------- */
+  function key() { return 'bedrock-bots:' + (DEV ? 'dev' : 'v2') + ':' + (session ? session.id : 'none'); }
+  function save() {
+    if (!session) return;
+    try { localStorage.setItem(key(), JSON.stringify(stats)); } catch (e) { /* storage unavailable */ }
+  }
+  function load() {
+    stats = { fees: 0, blocks: 0, rewards: 0, best: 0 };
+    try {
+      var raw = localStorage.getItem(key());
+      if (raw) {
+        var o = JSON.parse(raw);
+        ['fees', 'blocks', 'rewards', 'best'].forEach(function (k) { if (typeof o[k] === 'number' && isFinite(o[k])) stats[k] = o[k]; });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ---------- UI ---------- */
+  var logEl = $('log');
+  function log(text, cls, href) {
+    var first = logEl.firstChild;
+    if (first && first.className === 'empty') logEl.removeChild(first);
+    var li = document.createElement('li');
+    if (cls) li.className = cls;
+    var tm = document.createElement('span'); tm.className = 't'; tm.textContent = timeStr();
+    var tx = document.createElement('span');
+    if (href) { var an = document.createElement('a'); an.href = href; an.target = '_blank'; an.rel = 'noopener'; an.textContent = text; an.style.color = 'var(--accent)'; tx.appendChild(an); } else tx.textContent = text;
+    li.appendChild(tm); li.appendChild(tx);
+    logEl.insertBefore(li, logEl.firstChild);
+    while (logEl.children.length > 8) logEl.removeChild(logEl.lastChild);
+  }
+  function setStatus(s) { if (s !== lastStatus) { lastStatus = s; $('status').textContent = s; } }
+  function st(b, s) { if (b === player) setStatus('L' + (b.level + 1) + ' · ' + s); }
+  function updateStats() {
+    $('sBlocks').textContent = String(stats.blocks);
+    $('sRewards').textContent = String(stats.rewards);
+    $('sBest').textContent = fmt(stats.best);
+  }
+  function updatePool() {
+    $('poolLeft').textContent = fmt(poolLeft);
+    $('poolMeta').textContent = 'of ' + fmt(POOL_TOTAL);
+    $('poolBar').style.width = (poolLeft / POOL_TOTAL * 100).toFixed(1) + '%';
+    $('poolBlocks').textContent = rewardsLeft + (rewardsLeft === 1 ? ' hidden reward left' : ' hidden rewards left');
+  }
+  function renderMiners() {
+    var ul = $('miners');
+    while (ul.firstChild) ul.removeChild(ul.firstChild);
+    if (!bots.length) {
+      var e = document.createElement('li'); e.className = 'empty'; e.textContent = 'No miners yet.'; ul.appendChild(e);
+    } else {
+      bots.forEach(function (b) {
+        var li = document.createElement('li');
+        var sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = 'hsl(' + b.hue + ',65%,58%)';
+        var nm = document.createElement('span'); nm.className = 'mn'; nm.textContent = b.label;
+        var lv = document.createElement('span'); lv.className = 'ml'; lv.textContent = 'L' + (b.level + 1);
+        var am = document.createElement('span'); am.className = 'ma'; am.textContent = fmt(b === player ? stats.fees : b.earned);
+        li.appendChild(sw); li.appendChild(nm); li.appendChild(lv); li.appendChild(am); ul.appendChild(li);
+      });
+    }
+    $('addSim').disabled = !session || bots.length >= SLOTS;
+    $('clearSims').disabled = !session || bots.length < 2;
+  }
+  function setSpeed(n) {
+    speedMult = n;
+    $('speed1').setAttribute('aria-pressed', n === 1 ? 'true' : 'false');
+    $('speed3').setAttribute('aria-pressed', n === 3 ? 'true' : 'false');
+  }
+
+  // Levels above the focus level are cut away so you can see down into the one you are watching.
+  function applyFocus() {
+    focus = viewLevel >= 0 ? viewLevel : (player ? player.level : 0);
+    if (focus === lastFocus) return;
+    lastFocus = focus;
+    for (var l = 0; l < LV; l++) {
+      var vis = l >= focus;
+      pillars[l].forEach(function (m) { if (m) m.visible = vis; });
+      floors[l].visible = vis; supportsG[l].visible = vis; ceilings[l].visible = vis; stalac[l].visible = vis;
+    }
+    lanterns.forEach(function (ln) { ln.g.visible = ln.on && ln.level >= focus; });
+    $('lvlTag').textContent = 'Level ' + (focus + 1) + ' of ' + LV;
+  }
+
+  /* ---------- miners ---------- */
+  function createBot(slot, kind, label, name, hue) {
+    var rig = rigs[slot];
+    rig.cloth.color.setHSL(hue / 360, 0.6, 0.5);
+    var b = { id: slot, kind: kind, label: label, name: name, hue: hue, rig: rig, g: spawnCells[slot], level: 0,
+      pos: new THREE.Vector3(), path: [], target: -1, state: 'spawn', t: 0, hit: 0, swing: 0, yaw: 0, earned: 0, walk: 0, moving: false, dig: false, next: 'think' };
+    b.pos.set(wxg(b.g), 6, wzg(b.g));
+    bots.push(b);
+    return b;
+  }
+  function releaseClaim(b) { if (b.target >= 0 && claim[b.target] === b.id + 1) claim[b.target] = 0; b.target = -1; b.dig = false; }
+  function removeBot(b) {
+    releaseClaim(b);
+    b.rig.g.visible = false; b.rig.light.intensity = 0;
+    bots.splice(bots.indexOf(b), 1);
+  }
+  function removeAllBots() { while (bots.length) removeBot(bots[0]); player = null; marker.visible = false; }
+  function resetBots() {
+    bots.forEach(function (b) {
+      b.g = spawnCells[b.id]; b.level = 0; b.path = []; b.target = -1; b.hit = 0; b.t = 0; b.dig = false;
+      b.pos.set(wxg(b.g), 6, wzg(b.g));
+      b.state = 'spawn';
+    });
+    renderMiners();
+  }
+  function startRegen(msg) {
+    if (regenT > 0) return;
+    regenT = 1.4;
+    bots.forEach(function (b) { releaseClaim(b); b.state = 'idle'; });
+    setStatus('Opening a new mine');
+    log(msg);
+  }
+
+  /* ---------- session ---------- */
+  function startSession(id, kind) {
+    if (session) save();
+    removeAllBots();
+    session = { id: id, kind: kind, hue: hashStr(id) % 360 };
+    load();
+    shown = stats.fees;
+    $('fees').textContent = fmt(shown);
+    updateStats();
+    regenT = 0;
+    newWorld();
+    var label = kind === 'wallet' ? shortAddr(id) : 'Demo mode';
+    player = createBot(0, 'you', 'You (' + (kind === 'wallet' ? label : 'demo') + ')', 'You', session.hue);
+    cam.follow = true; syncCamBtns();
+    cam.tx = wxg(player.g); cam.tz = wzg(player.g); cam.ty = 0.8; clampPan();
+    $('walletAddr').textContent = label;
+    $('walletChip').className = 'chip on';
+    $('botName').textContent = kind === 'wallet' ? 'Miner ' + id.slice(-4) : 'Miner DEMO';
+    $('gate').hidden = true;
+    $('leaveBtn').hidden = false;
+    $('msg').hidden = true; $('installLink').hidden = true;
+    log(kind === 'wallet' ? 'Miner lowered in for ' + label + '.' : 'Demo miner lowered in. No wallet connected.');
+    setStatus('L1 · Descending');
+    renderMiners();
+  }
+  function endSession() {
+    save();
+    session = null; removeAllBots(); regenT = 0;
+    if (DEV) DEV.sessionId = null;
+    $('walletAddr').textContent = 'Not connected';
+    $('walletChip').className = 'chip';
+    $('botName').textContent = 'No miner yet';
+    $('gate').hidden = false;
+    $('leaveBtn').hidden = true;
+    setStatus('Idle');
+    newWorld();
+    renderMiners();
+  }
+  function addSim() {
+    if (!session) return;
+    var used = {}, slot = -1, k;
+    bots.forEach(function (b) { used[b.id] = true; });
+    for (k = 1; k < SLOTS; k++) if (!used[k]) { slot = k; break; }
+    if (slot < 0) return;
+    createBot(slot, 'sim', SIM_NAMES[slot - 1] + ' (sim)', SIM_NAMES[slot - 1], SIM_HUES[slot - 1]);
+    log(SIM_NAMES[slot - 1] + ' entered the mine (simulated).', 'sim');
+    renderMiners();
+  }
+  function clearSims() {
+    bots.slice().forEach(function (b) { if (b.kind === 'sim') removeBot(b); });
+    log('Simulated miners left.', 'sim');
+    renderMiners();
+  }
+
+  /* ---------- devnet mode: active only when served by server.js ---------- */
+  function api(url, body) {
+    var opt = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    return fetch(url, opt).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
+    });
+  }
+  function adopt(s) {
+    var sid = DEV ? DEV.sessionId : null;
+    DEV = s; DEV.sessionId = sid;
+    POOL_TOTAL = s.poolTotal; poolLeft = s.poolLeft; rewardsLeft = s.rewardsLeft;
+    $('devAddr').textContent = s.rewardWallet;
+    $('devBal').textContent = s.balance == null ? 'RPC unreachable' : (s.balance / 1e9).toFixed(4) + ' SOL';
+    $('devNote').textContent = s.dryRun ? 'Dry run: no transactions are sent, payouts are fake.' :
+      (s.needsFunding ? 'Send devnet SOL to this address (faucet.solana.com), then press New pool.' : 'Rewards are paid from this wallet to the wallet you connect.');
+    if (s.needsFunding && !session) showMsg('The reward wallet has no devnet SOL yet. Fund it, then press New pool in the side panel.', false);
+    updatePool();
+  }
+  function applyDev(s) {
+    DEV = null;
+    adopt(s);
+    rew.fill(0); frew.fill(0);
+    $('demoBtn').hidden = true;
+    $('gateTxt').textContent = 'Devnet test. Connect Phantom and your miner digs for devnet SOL paid by a local server.';
+    $('poolLbl').textContent = 'Reward pool (devnet SOL)';
+    $('shareLbl').textContent = 'Your share (devnet SOL)';
+    $('foot').textContent = 'Devnet test build. Rewards are devnet SOL, which has no real value, paid from a throwaway wallet by a server on this computer. This page only reads your public address.';
+    $('devCard').hidden = false;
+    updateStats();
+    setInterval(function () { api('/api/state').then(adopt).catch(function () {}); }, 15000);
+  }
+  var ready = api('/api/state').then(function (s) { if (s && s.devnet) applyDev(s); }).catch(function () { /* plain simulated mode */ });
+  function begin(addr) {
+    if (!DEV) { startSession(addr, 'wallet'); return; }
+    api('/api/session', { address: addr }).then(function (r) {
+      DEV.sessionId = r.sessionId;
+      startSession(addr, 'wallet');
+    }).catch(function (e) { showMsg('Could not start a devnet session: ' + e.message, false); });
+  }
+  function devDig(b, x, y, z, what) {
+    var sid = DEV.sessionId;
+    if (!sid) return;
+    api('/api/dig', { sessionId: sid }).then(function (r) {
+      if (!session || DEV.sessionId !== sid) return;
+      poolLeft = DEV.poolLeft = r.poolLeft; rewardsLeft = DEV.rewardsLeft = r.rewardsLeft;
+      if (r.reward > 0) {
+        collect(b, r.reward, x, y, z, what, true);
+        if (r.signature) log('View payout on devnet', 'win', 'https://explorer.solana.com/tx/' + r.signature + '?cluster=devnet');
+        api('/api/state').then(adopt).catch(function () {});
+      } else updatePool();
+      if (r.error) log(r.error, 'sim');
+    }).catch(function () { /* rate limited or busy: skip this dig */ });
+  }
+
+  /* ---------- wallet ---------- */
+  function getProvider() {
+    var p = window.phantom && window.phantom.solana;
+    if (p && p.isPhantom) return p;
+    if (window.solana && window.solana.isPhantom) return window.solana;
+    return null;
+  }
+  function connectWallet() {
+    var p = getProvider();
+    if (!p) { showMsg('Phantom was not detected in this browser. You can install it, or try demo mode.', true); return; }
+    p.connect().then(function (r) {
+      begin(r.publicKey.toString());
+    }).catch(function (e) {
+      showMsg(e && e.code === 4001 ? 'The connection request was declined.' : 'Could not connect to Phantom. Try again.', false);
+    });
+  }
+  (function wireProvider() {
+    var p = getProvider();
+    if (!p) return;
+    if (p.on) {
+      p.on('disconnect', function () { if (session && session.kind === 'wallet') endSession(); });
+      p.on('accountChanged', function (pk) { if (pk) begin(pk.toString()); else if (session && session.kind === 'wallet') endSession(); });
+    }
+    try {
+      p.connect({ onlyIfTrusted: true }).then(function (r) { return ready.then(function () { if (!session) begin(r.publicKey.toString()); }); }).catch(function () {});
+    } catch (e) { /* ignore */ }
+  })();
+
+  /* ---------- miner AI: walk the cave, pick a wall or the floor, dig it ---------- */
+  function think(b) {
+    releaseClaim(b);
+    var start = b.g, dist = new Int16Array(NN).fill(-1), par = new Int32Array(NN).fill(-1), q = new Int32Array(NN);
+    var qh = 0, qt = 0, walls = [], floorsC = [], anyWall = false, anyFloor = false;
+    dist[start] = 0; q[qt++] = start;
+    while (qh < qt) {
+      var cur = q[qh++], l = gl(cur), x = gx(cur), z = gz(cur), d, ng;
+      for (d = 0; d < 4; d++) {
+        var nx = x + DIRS[d][0], nz = z + DIRS[d][1];
+        if (nx < 0 || nx >= X || nz < 0 || nz >= Z) continue;
+        ng = l * N + nz * X + nx;
+        if (grid[ng] === 0) {
+          if (dist[ng] < 0) { dist[ng] = dist[cur] + 1; par[ng] = cur; q[qt++] = ng; }
+        } else if (grid[ng] !== 5) {
+          anyWall = true;
+          if (!claim[ng]) walls.push(ng, cur);
+        }
+      }
+      if (l < LV - 1) {
+        if (fgrid[cur] === 0 && grid[cur + N] === 0) {
+          if (dist[cur + N] < 0) { dist[cur + N] = dist[cur] + 1; par[cur + N] = cur; q[qt++] = cur + N; }
+        } else if (fgrid[cur] === 1) {
+          anyFloor = true;
+          if (!claim[NN + cur]) floorsC.push(NN + cur, cur);
+        }
+      }
+      if (l > 0 && fgrid[cur - N] === 0 && grid[cur - N] === 0 && dist[cur - N] < 0) { dist[cur - N] = dist[cur] + 1; par[cur - N] = cur; q[qt++] = cur - N; }
+    }
+    if (!anyWall && !anyFloor) { startRegen('Nothing left to dig. Opening a new mine.'); return; }
+    var useFloor = floorsC.length && (!walls.length || Math.random() < 0.26);
+    var list = useFloor ? floorsC : walls;
+    if (!list.length) { b.state = 'wait'; b.t = 0.4; b.moving = false; st(b, 'Waiting'); return; }
+    var pickN = Math.min(useFloor ? 6 : 10, list.length / 2), pk = ((Math.random() * pickN) | 0) * 2;
+    var target = list[pk], stand = list[pk + 1], path = [], c = stand;
+    while (c !== start) { path.unshift(c); c = par[c]; }
+    b.path = path; b.target = target; b.hit = 0; b.swing = 0; b.dig = target >= NN;
+    claim[target] = b.id + 1;
+    if (path.length) { b.state = 'move'; b.moving = true; st(b, 'Walking'); }
+    else beginMining(b);
+  }
+  function beginMining(b) {
+    b.state = 'mine'; b.moving = false; b.hit = 0;
+    st(b, b.target >= NN ? 'Digging down' : 'Digging ' + NAMES[grid[b.target]].toLowerCase());
+  }
+
+  function updateBot(b, sdt) {
+    switch (b.state) {
+      case 'spawn':
+        b.t += sdt / 1.2;
+        var k = Math.min(1, b.t), e = 1 - Math.pow(1 - k, 3);
+        b.pos.y = 6 * (1 - e);
+        if (k >= 1) {
+          b.pos.y = 0; b.state = 'think';
+          emit(b.pos.x, 0.1, b.pos.z, PAL.floor, 14, 2.4, 0.12, 0.8);
+        }
+        break;
+      case 'think': think(b); break;
+      case 'wait':
+        b.t -= sdt;
+        if (b.t <= 0) b.state = 'think';
+        break;
+      case 'move':
+        if (!b.path.length) { beginMining(b); break; }
+        var nx = b.path[0], nl = gl(nx);
+        var tx = wxg(nx), ty = baseY(nl), tz = wzg(nx);
+        var dx = tx - b.pos.x, dy = ty - b.pos.y, dz = tz - b.pos.z;
+        var dd = Math.sqrt(dx * dx + dy * dy + dz * dz), step = WALK_SPEED * sdt;
+        b.moving = true; b.walk += sdt;
+        if (Math.abs(dx) + Math.abs(dz) > 0.01) b.yaw = Math.atan2(dx, dz);
+        if (dd <= step) {
+          b.pos.set(tx, ty, tz); b.g = nx; b.path.shift();
+          if (nl !== b.level) { b.level = nl; if (b === player) renderMiners(); }
+          if (!b.path.length) beginMining(b);
+        } else { b.pos.x += dx / dd * step; b.pos.y += dy / dd * step; b.pos.z += dz / dd * step; }
+        break;
+      case 'mine':
+        var tg = b.target;
+        if (tg < 0) { b.state = 'think'; break; }
+        if (tg < NN) {
+          if (grid[tg] === 0) { b.state = 'think'; break; }
+          var ddx = wxg(tg) - b.pos.x, ddz = wzg(tg) - b.pos.z;
+          if (Math.abs(ddx) + Math.abs(ddz) > 0.01) b.yaw = Math.atan2(ddx, ddz);
+        } else if (fgrid[tg - NN] !== 1) { b.state = 'think'; break; }
+        b.hit += sdt; b.swing = Math.min(1, b.hit / HIT_TIME);
+        if (tg < NN) setBlock(tg, 1 - 0.05 * Math.sin(b.swing * Math.PI), ys[tg]);
+        if (b.hit >= HIT_TIME) { b.hit -= HIT_TIME; if (tg < NN) hitBlock(b, tg); else hitFloor(b, tg - NN); }
+        break;
+      case 'descend':
+        b.t += sdt / 0.8;
+        var kk = Math.min(1, b.t);
+        b.pos.y = b.y0 + (b.y1 - b.y0) * kk * kk;
+        if (kk >= 1) {
+          b.pos.y = b.y1; b.g = b.g2; b.level = gl(b.g);
+          emit(b.pos.x, b.y1 + 0.1, b.pos.z, PAL.floor, 12, 2.4, 0.12, 0.8);
+          if (b === player) renderMiners();
+          if (b.next === 'celebrate') { b.state = 'celebrate'; b.t = 0.9; } else b.state = 'think';
+        }
+        break;
+      case 'celebrate':
+        b.t -= sdt;
+        if (b.t <= 0) {
+          if (poolLeft <= 0 && !DEV) startRegen('The pool is drained. A new mine is opening with a fresh pool.');
+          else b.state = 'think';
+        }
+        break;
+      default: break;
+    }
+  }
+
+  // Near walls on the camera's side are lowered so the miner is never hidden behind rock.
+  function updateLowering(dt) {
+    var want = {}, g, key, k;
+    if (player && player.level === focus && player.state !== 'spawn') {
+      var px = gx(player.g), pz = gz(player.g), sn = Math.sin(cam.theta), cs = Math.cos(cam.theta);
+      for (var dz = -3; dz <= 3; dz++) for (var dx = -3; dx <= 3; dx++) {
+        if (dx * dx + dz * dz > 10 || dx * sn + dz * cs < -0.3) continue;
+        var nx = px + dx, nz = pz + dz;
+        if (nx < 0 || nz < 0 || nx >= X || nz >= Z) continue;
+        g = player.level * N + nz * X + nx;
+        if (grid[g] !== 0 && g !== player.target) want[g] = true;
+      }
+    }
+    for (key in want) lowered[key] = true;
+    for (key in lowered) {
+      g = +key;
+      var tgt = want[key] ? 0.3 : 1, cur = ys[g], nv = cur + (tgt - cur) * Math.min(1, dt * 8);
+      if (Math.abs(nv - tgt) < 0.01) nv = tgt;
+      if (grid[g] === 0) { delete lowered[key]; ys[g] = 1; continue; }
+      if (nv !== cur) { ys[g] = nv; setBlock(g, 1, nv); }
+      if (nv === 1 && !want[key]) delete lowered[key];
+    }
+  }
+
+  function update(dt) {
+    t += dt;
+    stepParticles(dt);
+    for (var k = 0; k < lanterns.length; k++) {
+      var ln = lanterns[k], lit = ln.on && ln.level >= focus;
+      ln.L.intensity = lit ? 1.15 + 0.2 * Math.sin(t * 11 + k * 1.9) + 0.12 * Math.sin(t * 27 + k * 2.3) : 0;
+      ln.lamp.scale.y = 0.92 + 0.12 * Math.sin(t * 15 + k);
+    }
+    var sdt = dt * speedMult;
+    if (regenT > 0) {
+      regenT -= sdt;
+      if (regenT <= 0) { newWorld(); resetBots(); }
+      return;
+    }
+    for (var i = 0; i < bots.length; i++) updateBot(bots[i], sdt);
+  }
+
+  function collect(b, amt, x, y, z, what, noDec) {
+    if (!noDec) { poolLeft -= amt; rewardsLeft--; }
+    b.earned += amt;
+    emit(x, y, z, ['#F5B83A', '#FFE27A', '#FFFFFF'], 30, 5.2, 0.12, 1.1);
+    flash.position.set(x, y + 0.4, z); flashT = 0.6;
+    pop('+' + fmt(amt), x, y + 0.7, z, b === player ? '' : 'sim');
+    if (b === player) {
+      stats.fees += amt; stats.rewards++;
+      if (amt > stats.best) stats.best = amt;
+      var tier = amt < 20 ? 'Small find' : amt < 60 ? 'Nice find' : 'Jackpot';
+      log(tier + ' in ' + what + ': +' + fmt(amt), 'win');
+      setStatus('L' + (b.level + 1) + ' · Found something');
+      save();
+    } else {
+      log(b.name + ' found ' + fmt(amt) + ' in ' + what + '.', 'sim');
+    }
+    updatePool(); renderMiners();
+  }
+
+  function hitBlock(b, g) {
+    dmg[g]++;
+    var y0 = baseY(gl(g));
+    emit(wxg(g) - Math.sin(b.yaw) * 0.5, y0 + 0.9, wzg(g) - Math.cos(b.yaw) * 0.5, PAL[btype[g]], 3, 2.2, 0.1, 0.7);
+    if (dmg[g] >= HARD[grid[g]]) breakBlock(b, g); else shadeBlock(g);
+  }
+  function breakBlock(b, g) {
+    var type = grid[g], x = wxg(g), z = wzg(g), y0 = baseY(gl(g));
+    grid[g] = 0; dmg[g] = 0; claim[g] = 0; b.target = -1; b.dig = false;
+    setBlock(g, 0, 1);
+    emit(x, y0 + 0.8, z, PAL[type], 16, 3.4, 0.15, 0.9);
+    var mine = b === player;
+    if (mine) stats.blocks++;
+    if (DEV && mine) devDig(b, x, y0 + 0.9, z, NAMES[type].toLowerCase());
+    var amt = rew[g];
+    if (amt > 0) {
+      rew[g] = 0;
+      collect(b, amt, x, y0 + 0.9, z, NAMES[type].toLowerCase());
+      b.state = 'celebrate'; b.t = 0.9;
+    } else {
+      if (mine && stats.blocks % 25 === 0) log(stats.blocks + ' blocks dug.');
+      b.state = 'think';
+    }
+    if (mine) { updateStats(); if (stats.blocks % 10 === 0) save(); }
+  }
+
+  function hitFloor(b, g) {
+    fdmg[g]++;
+    emit(b.pos.x, baseY(gl(g)) + 0.1, b.pos.z, PAL.floor, 3, 2.2, 0.1, 0.7);
+    if (fdmg[g] >= FHARD) breakFloor(b, g); else shadeFloor(g);
+  }
+  // Breaking the floor opens a shaft: the cell below is carved out and the miner drops to the next level.
+  function breakFloor(b, g) {
+    var l = gl(g), x = wxg(g), z = wzg(g), y0 = baseY(l), lg = g + N, found = false;
+    fgrid[g] = 0; fdmg[g] = 0; claim[NN + g] = 0; b.target = -1; b.dig = false;
+    setFloor(g, 0);
+    emit(x, y0 - 0.3, z, PAL.floor, 18, 3.0, 0.15, 0.9);
+    if (b === player) { stats.blocks++; updateStats(); }
+    if (DEV && b === player) devDig(b, x, y0, z, 'the floor');
+    if (frew[g] > 0) { var a1 = frew[g]; frew[g] = 0; collect(b, a1, x, y0, z, 'the floor'); found = true; }
+    if (grid[lg] !== 0) {
+      var lt = grid[lg];
+      grid[lg] = 0; dmg[lg] = 0; claim[lg] = 0; setBlock(lg, 0, 1);
+      emit(x, baseY(l + 1) + 0.8, z, PAL[lt], 12, 3.0, 0.14, 0.9);
+      if (rew[lg] > 0) { var a2 = rew[lg]; rew[lg] = 0; collect(b, a2, x, baseY(l + 1) + 0.9, z, NAMES[lt].toLowerCase()); found = true; }
+    }
+    if (b === player) log('Dug a shaft down to level ' + (l + 2) + '.');
+    b.state = 'descend'; b.t = 0; b.y0 = b.pos.y; b.y1 = baseY(l + 1); b.g2 = lg; b.moving = false;
+    b.next = found ? 'celebrate' : 'think';
+    st(b, 'Dropping down');
+  }
+
+  /* ---------- miner visuals ---------- */
+  function syncBot(b, dt) {
+    var r = b.rig, ph = t + b.id * 1.3, vis = b.level >= focus;
+    r.g.visible = vis;
+    var bob = b.moving ? Math.abs(Math.sin(b.walk * 9)) * 0.05 : 0;
+    if (b.state === 'celebrate') bob = Math.abs(Math.sin(ph * 12)) * 0.22;
+    r.g.position.set(b.pos.x, b.pos.y + bob, b.pos.z);
+    r.light.position.set(b.pos.x, b.pos.y + 1.25, b.pos.z);
+    r.light.intensity = vis ? 1.5 + (b.state === 'spawn' ? (1 - Math.min(1, b.t)) * 1.5 : 0) : 0;
+    var diff = Math.atan2(Math.sin(b.yaw - r.body.rotation.y), Math.cos(b.yaw - r.body.rotation.y));
+    r.body.rotation.y += diff * Math.min(1, dt * 12);
+    var sw = b.moving ? Math.sin(b.walk * 9) * 0.7 : 0;
+    r.legL.rotation.x = sw; r.legR.rotation.x = -sw; r.armL.rotation.x = -sw * 0.8;
+    var down = b.state === 'mine' && b.dig;
+    r.tool.rotation.x += ((down ? 1.0 : 0) - r.tool.rotation.x) * Math.min(1, dt * 10);
+    if (b.state === 'mine') r.swingG.rotation.x = -1.3 + b.swing * 1.65;
+    else if (b.state === 'celebrate') r.swingG.rotation.x = -2.3;
+    else if (b.state === 'descend') r.swingG.rotation.x = -0.6;
+    else r.swingG.rotation.x = b.moving ? sw * 0.8 - 0.2 : -0.35;
+  }
+
+  /* ---------- loop ---------- */
+  var last = 0;
+  function frame(ts) {
+    var dt = Math.min(0.05, (ts - last) / 1000 || 0);
+    last = ts;
+    applyFocus();
+    update(dt);
+    updateLowering(dt);
+    for (var i = 0; i < bots.length; i++) syncBot(bots[i], dt);
+    if (player) {
+      marker.visible = player.level >= focus; marker.position.set(player.pos.x, player.pos.y + 0.03, player.pos.z);
+      var pulse = 1 + 0.08 * Math.sin(t * 5); marker.scale.set(pulse, pulse, pulse);
+      var kf = Math.min(1, dt * 3);
+      if (cam.follow) { cam.tx += (player.pos.x - cam.tx) * kf; cam.tz += (player.pos.z - cam.tz) * kf; clampPan(); }
+      cam.ty += (player.pos.y + 0.8 - cam.ty) * kf;
+      if (cam.chase) {
+        var diff = Math.atan2(Math.sin(player.yaw + Math.PI - cam.theta), Math.cos(player.yaw + Math.PI - cam.theta));
+        cam.theta += diff * Math.min(1, dt * 2.2);
+      }
+    } else {
+      cam.ty += (baseY(focus) + 0.8 - cam.ty) * Math.min(1, dt * 3);
+    }
+    placeCamera();
+    renderer.render(scene, camera);
+    if (Math.abs(shown - stats.fees) > 0.5) {
+      shown += (stats.fees - shown) * Math.min(1, dt * 6);
+      if (Math.abs(shown - stats.fees) < 0.5) shown = stats.fees;
+      $('fees').textContent = fmt(shown);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- events ---------- */
+  $('connectBtn').addEventListener('click', connectWallet);
+  $('demoBtn').addEventListener('click', function () { startSession('demo', 'demo'); });
+  $('leaveBtn').addEventListener('click', function () {
+    var wasWallet = session && session.kind === 'wallet';
+    var p = getProvider();
+    if (wasWallet && p && p.disconnect) { try { p.disconnect(); } catch (e) { /* ignore */ } }
+    endSession();
+  });
+  $('resetBtn').addEventListener('click', function () {
+    stats = { fees: 0, blocks: 0, rewards: 0, best: 0 };
+    shown = 0; $('fees').textContent = fmt(0); updateStats(); save(); renderMiners();
+    if (session) log('Your share was reset.');
+  });
+  $('addSim').addEventListener('click', addSim);
+  $('clearSims').addEventListener('click', clearSims);
+  $('speed1').addEventListener('click', function () { setSpeed(1); });
+  $('speed3').addEventListener('click', function () { setSpeed(3); });
+  $('followBtn').addEventListener('click', function () { cam.follow = !cam.follow; syncCamBtns(); });
+  $('chaseBtn').addEventListener('click', function () { cam.chase = !cam.chase; if (cam.chase) cam.follow = true; syncCamBtns(); });
+  $('viewBtn').addEventListener('click', function () {
+    cam.theta = DEF.theta; cam.phi = DEF.phi; cam.r = DEF.r; cam.follow = true; cam.chase = false; syncCamBtns();
+    if (!player) { cam.tx = 0; cam.tz = 0; }
+  });
+  Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (btn) {
+    btn.addEventListener('click', function () {
+      var v = btn.getAttribute('data-lv');
+      viewLevel = v === 'auto' ? -1 : +v;
+      Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (o) { o.setAttribute('aria-pressed', o === btn ? 'true' : 'false'); });
+    });
+  });
+  $('newPoolBtn').addEventListener('click', function () {
+    api('/api/reset-pool', {}).then(function (s) { adopt(s); $('msg').hidden = true; log('New reward pool: ' + fmt(s.poolTotal) + ' in ' + s.rewardsLeft + ' hidden rewards.'); })
+      .catch(function (e) { log('Could not reset the pool: ' + e.message, 'sim'); });
+  });
+  $('copyAddr').addEventListener('click', function () {
+    var a = $('devAddr').textContent, btn = $('copyAddr');
+    function done(t) { btn.textContent = t; setTimeout(function () { btn.textContent = 'Copy address'; }, 1400); }
+    try { navigator.clipboard.writeText(a).then(function () { done('Copied'); }, function () { done('Select it manually'); }); } catch (e) { done('Select it manually'); }
+  });
+  window.addEventListener('pagehide', save);
+
+  newWorld();
+  renderMiners();
+  syncCamBtns();
+  requestAnimationFrame(frame);
+})();
+</script>
