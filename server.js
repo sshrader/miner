@@ -9,6 +9,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '127.0.0.1';               // use 0.0.0.0 on a host like Railway
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';        // set to 1 only when a trusted proxy (Railway) sits in front
+const MAX_PER_IP = Math.max(0, Number(process.env.MAX_PER_IP) || 0);   // miners allowed per connection address; 0 = no limit
+const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean);
 const RPC_URL = process.env.RPC_URL || 'https://api.devnet.solana.com';
 const POOL_SOL = parseFloat(process.env.POOL_SOL || '0.5');
 // The Solana library is only needed for real devnet payouts. A dry run (--dry-run) works without installing it.
@@ -61,6 +65,7 @@ function fakeAddress() {
   return o;
 }
 function loadWallet() {
+  if (process.env.REWARD_WALLET_JSON) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(process.env.REWARD_WALLET_JSON)));   // for hosts without a persistent disk
   if (DRY_RUN) { const a = fakeAddress(); return { publicKey: { toBase58: () => a } }; }
   if (fs.existsSync(WALLET_FILE)) {
     return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(fs.readFileSync(WALLET_FILE, 'utf8'))));
@@ -292,12 +297,22 @@ function send(res, code, obj) {
 }
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' };
 
+// The address a request really came from. Behind a trusted proxy that is the first X-Forwarded-For entry.
+function ipOf(req) {
+  let ip = '';
+  if (TRUST_PROXY) ip = String(req.headers['x-real-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0]).trim();
+  if (!ip) ip = req.socket.remoteAddress || '';
+  ip = ip.replace(/^::ffff:/, '');
+  if (ip.includes(':')) ip = ip.split(':').slice(0, 4).join(':');   // one IPv6 customer owns a whole /64
+  return ip;
+}
+const joinLog = new Map();   // ip -> recent join times, to slow down hammering
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     if (req.method === 'POST') {
       const origin = req.headers.origin;
-      if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}`) return send(res, 403, { error: 'Bad origin' });
+      if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}` && !ALLOWED_ORIGINS.includes(origin)) return send(res, 403, { error: 'Bad origin' });
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
@@ -313,12 +328,21 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       let addr;
       try { addr = DRY_RUN ? checkAddr(String(body.address)) : new PublicKey(String(body.address)).toBase58(); } catch (e) { return send(res, 400, { error: 'Invalid wallet address' }); }
+      const ip = ipOf(req), nowMs = Date.now();
+      const recent = (joinLog.get(ip) || []).filter((t) => nowMs - t < 60000);
+      if (recent.length >= 10) return send(res, 429, { error: 'Too many join attempts. Wait a minute.' });
+      recent.push(nowMs); joinLog.set(ip, recent);
+      if (MAX_PER_IP > 0) {
+        let n = 0;
+        for (const s2 of sessions.values()) if (s2.ip === ip && s2.address !== addr) n++;
+        if (n >= MAX_PER_IP) return send(res, 429, { error: 'Only ' + MAX_PER_IP + (MAX_PER_IP === 1 ? ' miner is' : ' miners are') + ' allowed per connection. Disconnect your other wallet first.' });
+      }
       // One miner per wallet: a new session for the same address replaces the old one.
       for (const [sid, s2] of sessions) if (s2.address === addr) dropSession(sid);
       const miner = world.addMiner(addr, hashStr(addr) % 360);
       if (!miner) return send(res, 409, { error: 'The mine is full (' + SLOTS + ' miners). Try again in a bit.' });
       const id = crypto.randomBytes(12).toString('hex');
-      sessions.set(id, { address: addr, minerId: miner.id, last: Date.now() });
+      sessions.set(id, { address: addr, minerId: miner.id, last: Date.now(), ip });
       console.log('Miner ' + miner.id + ' joined: ' + addr);
       return send(res, 200, { sessionId: id, minerId: miner.id });
     }
@@ -418,10 +442,11 @@ const server = http.createServer(async (req, res) => {
     for (const c of clients) { try { c.write(': keepalive\n\n'); } catch (e) { clients.delete(c); } }
   }, 5000);
   setInterval(() => { topUp().catch((e) => console.error('Top-up check failed: ' + e.message)); }, Number(process.env.TOPUP_EVERY_MS) || 15000);
-  server.listen(PORT, '127.0.0.1', () => {
+  server.listen(PORT, HOST, () => {
+    if (HOST !== '127.0.0.1' && !MAX_PER_IP) console.log('WARNING: the server is reachable from outside but MAX_PER_IP is not set.');
     console.log('');
     console.log('Bedrock Bots (devnet) running at http://127.0.0.1:' + PORT);
-    console.log('Admin link (keep private): http://127.0.0.1:' + PORT + '/#admin=' + ADMIN_KEY);
+    console.log('Admin link (keep private): ' + (ALLOWED_ORIGINS[0] || 'http://127.0.0.1:' + PORT) + '/#admin=' + ADMIN_KEY);
     console.log('Reward wallet (send DEVNET SOL here): ' + payer.publicKey.toBase58());
     if (pool.total === 0) console.log('The wallet needs devnet SOL. Fund it at https://faucet.solana.com (network: devnet), then click "New pool" in the page.');
   });

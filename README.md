@@ -93,3 +93,23 @@ Every 15 seconds the server checks the reward wallet. Whatever arrived since the
 ## Admin access
 
 "New pool" and the dry-run funding endpoint are admin-only. On start the server prints an **Admin link** like `http://127.0.0.1:3000/#admin=...`. Open that link and the "New pool (admin)" button appears; everyone else never sees it, and the server refuses the request without the key. Set your own with `ADMIN_KEY=<long random hex>` so the link stays the same between restarts. Keep the link private.
+
+## Limits per connection, and hosting (Railway)
+
+`MAX_PER_IP=1` allows one miner per connection address (a second wallet from the same IP is refused; the same wallet reconnecting just replaces its old miner). Joins are also limited to 10 per minute per IP. IPv6 users are grouped by their /64 block. This is a speed bump, not a guarantee: VPNs get around it, and people sharing a home or mobile network share a limit. Pair it with a minimum holding when real value is involved.
+
+Behind a host like Railway the server sees the proxy's address, so set `TRUST_PROXY=1` to read the visitor's real IP from the proxy headers. Only do that when a trusted proxy really is in front; on a directly exposed server the header can be forged.
+
+Variables to set on Railway (devnet only for now):
+
+| Variable | Value |
+|---|---|
+| `HOST` | `0.0.0.0` |
+| `TRUST_PROXY` | `1` |
+| `MAX_PER_IP` | `1` |
+| `ALLOWED_ORIGINS` | your public address, e.g. `https://your-app.up.railway.app` |
+| `ADMIN_KEY` | a long random hex string (your admin link is that address plus `/#admin=<key>`) |
+| `REWARD_WALLET_JSON` | the throwaway devnet keypair as a JSON array (Railway has no persistent disk for `reward-wallet.json`) |
+| `DIFFICULTY`, `SEASON_END`, `POOL_SOL` | as you like |
+
+Run exactly one instance: the mine lives in that process's memory. A restart rebuilds the mine and re-hides the unfound rewards from the wallet balance (rewards already paid stay paid).
