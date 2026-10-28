@@ -121,6 +121,25 @@ async function pay(address, lamports) {
 }
 
 const sessions = new Map();
+
+// Chat: kept in memory, last 100 messages. Everyone connected to this server sees the same chat.
+const chat = [];
+let chatSeq = 0;
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function b58decode(str) {
+  let n = 0n;
+  for (const c of str) { const i = B58.indexOf(c); if (i < 0) throw new Error('bad base58'); n = n * 58n + BigInt(i); }
+  let hex = n.toString(16); if (hex.length % 2) hex = '0' + hex;
+  let lead = 0; for (const c of str) { if (c === '1') lead++; else break; }
+  return Buffer.concat([Buffer.alloc(lead), Buffer.from(hex, 'hex')]);
+}
+// Checks an ed25519 signature made by a Solana wallet over a text message.
+function verifySig(address, message, sigB64) {
+  const pub = b58decode(address);
+  if (pub.length !== 32) return false;
+  const key = crypto.createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), pub]), format: 'der', type: 'spki' });
+  return crypto.verify(null, Buffer.from(message, 'utf8'), key, Buffer.from(sigB64, 'base64'));
+}
 function checkAddr(a) { if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) throw new Error('bad'); return a; }
 
 async function handleDig(sess) {
@@ -187,6 +206,41 @@ const server = http.createServer(async (req, res) => {
       if (now - sess.last < MIN_DIG_GAP_MS) return send(res, 429, { error: 'Too fast' });
       sess.last = now;
       return send(res, 200, await handleDig(sess));
+    }
+    if (url.pathname === '/api/chat' && req.method === 'GET') {
+      const since = Number(url.searchParams.get('since')) || 0;
+      return send(res, 200, { messages: chat.filter((m) => m.id > since), last: chatSeq });
+    }
+    if (url.pathname === '/api/chat' && req.method === 'POST') {
+      const body = await readBody(req);
+      const sess = sessions.get(String(body.sessionId));
+      if (!sess) return send(res, 404, { error: 'Unknown session' });
+      const text = String(body.text || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 140);
+      if (!text) return send(res, 400, { error: 'Empty message' });
+      const now = Date.now();
+      if (now - (sess.lastChat || 0) < 1500) return send(res, 429, { error: 'Slow down a little' });
+      sess.lastChat = now;
+      chat.push({ id: ++chatSeq, addr: sess.address, verified: !!sess.verified, text, ts: now });
+      if (chat.length > 100) chat.shift();
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/verify-start' && req.method === 'POST') {
+      const body = await readBody(req);
+      const sess = sessions.get(String(body.sessionId));
+      if (!sess) return send(res, 404, { error: 'Unknown session' });
+      sess.challenge = 'Bedrock Bots devnet: I own wallet ' + sess.address + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
+      return send(res, 200, { message: sess.challenge });
+    }
+    if (url.pathname === '/api/verify' && req.method === 'POST') {
+      const body = await readBody(req);
+      const sess = sessions.get(String(body.sessionId));
+      if (!sess || !sess.challenge) return send(res, 404, { error: 'No verification in progress' });
+      if (DRY_RUN) return send(res, 400, { error: 'Dry run uses made-up addresses, so there is nothing to verify.' });
+      let ok = false;
+      try { ok = verifySig(sess.address, sess.challenge, String(body.signature)); } catch (e) { ok = false; }
+      if (!ok) return send(res, 400, { error: 'That signature does not match this wallet.' });
+      sess.verified = true; sess.challenge = null;
+      return send(res, 200, { verified: true });
     }
     if (url.pathname === '/api/reset-pool' && req.method === 'POST') {
       await buildPool();

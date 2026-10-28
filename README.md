@@ -25,6 +25,12 @@ npm start
 4. In Phantom: Settings > Developer Settings > Testnet Mode > Solana Devnet, so you can see the SOL arrive.
 5. Press **Connect Phantom**. Your miner drops in, and every reward shows up with a link to the transaction on Solana Explorer (devnet).
 
+## Chat and wallet check
+
+- Everyone connected to the same server shares one chat (last 100 messages, 140 characters each). A message also pops up above that miner's head.
+- **Verify my wallet** asks Phantom to sign a short text message. The server checks the signature, and your chat messages then get a green check, which proves you own that address. It is a message, not a transaction, and it is free.
+- Chat is local to your server. Other people can only join if you make the server reachable to them, which this project does not set up. The miners themselves are not shared between browsers yet.
+
 ## Try it without any network
 
 ```powershell
