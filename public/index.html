@@ -35,6 +35,9 @@ body {
 .wrap { max-width: 1760px; margin: 0 auto; }
 
 header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding-bottom: 20px; }
+.topnav { display: flex; flex-wrap: wrap; gap: 8px; }
+.topnav a { display: inline-block; min-height: 44px; line-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--fg); text-decoration: none; font-weight: 600; font-size: 15px; }
+.topnav a:hover { border-color: var(--accent); }
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .logo { width: 34px; height: 34px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; flex: none; }
 .logo i { display: block; }
@@ -175,6 +178,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
         <p class="sub">Hold <span data-ticker></span>, send a miner underground, and watch it dig deeper.</p>
       </div>
     </div>
+    <nav class="topnav" aria-label="Pages">
+      <a href="/how-it-works.html">How it works</a>
+      <a href="/rules.html">Rules</a>
+      <a href="/faq.html">FAQ</a>
+    </nav>
     <div class="wallet">
       <button class="chip" id="walletChip" type="button" aria-haspopup="menu" aria-expanded="false"><span class="dot"></span><span id="walletAddr">Not connected</span><span class="caret" id="walletCaret" hidden aria-hidden="true">&#9662;</span></button>
       <div class="wmenu" id="walletMenu" role="menu" hidden>

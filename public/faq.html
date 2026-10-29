@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rock Bottom Rewards FAQ</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
+</head><body><main class="page">
+<div class="bar"><a class="name" href="/"><svg width="40" height="40" viewBox="0 0 120 120" aria-hidden="true"><defs><clipPath id="nc"><rect x="4" y="4" width="112" height="112" rx="22"/></clipPath></defs><g clip-path="url(#nc)"><rect width="120" height="15" fill="#4d4436"/><rect y="15" width="120" height="15" fill="#41392d"/><rect y="30" width="120" height="15" fill="#574c3b"/><rect y="45" width="120" height="15" fill="#3a3329"/><rect y="60" width="120" height="15" fill="#4a4034"/><rect y="75" width="120" height="15" fill="#322c23"/><rect y="90" width="120" height="14" fill="#2a251e"/><rect y="104" width="120" height="16" fill="#f2b632"/><rect x="36" width="48" height="104" fill="#17130e"/><rect x="59.2" width="1.6" height="34" fill="#8f8574"/><path d="M44 58 A16 15 0 0 1 76 58 Z" fill="#f2b632"/><rect x="42" y="57" width="36" height="5" rx="2.5" fill="#d98f0a"/><rect x="45" y="62" width="30" height="22" rx="6" fill="#c9c2b4"/><circle cx="53" cy="72" r="3.6" fill="#17130e"/><circle cx="67" cy="72" r="3.6" fill="#17130e"/><circle cx="54" cy="71" r="1.2" fill="#f2b632"/><circle cx="68" cy="71" r="1.2" fill="#f2b632"/><line x1="54" y1="79" x2="66" y2="79" stroke="#17130e" stroke-width="1.8" stroke-linecap="round"/><circle cx="60" cy="48" r="4.2" fill="#fff1c4" stroke="#17130e" stroke-width="1.5"/><path d="M60 40 L60 36 M52 42 L49 38 M68 42 L71 38" stroke="#fff1c4" stroke-width="2" stroke-linecap="round"/><path d="M60 92 L66 100 L60 108 L54 100 Z" fill="#fff1c4"/></g></svg><span>Rock Bottom Rewards</span></a><nav class="nav" aria-label="Pages"><a href="/">The mine</a><a href="/how-it-works.html">How it works</a><a href="/rules.html">Rules</a><a href="/faq.html" aria-current="page">FAQ</a></nav></div><h1>FAQ</h1>
+<p class="mut" id="net"></p>
+<details><summary>Is it free to play?</summary><p>There is no entry fee. If a token holding is required, that is shown on the <a href="/how-it-works.html">How it works</a> page. You keep your tokens; they are only checked, never taken.</p></details>
+<details><summary>Is it safe to connect or paste my wallet?</summary><p>The game only needs your public address. It will never ask for your seed phrase or private key, and nobody running it will either. If anything asks for them, it is not this game. Connecting Phantom asks you to approve a connection and, optionally, to sign a plain message that proves you own the address. It cannot move your funds.</p></details>
+<details><summary>Can I control my miner?</summary><p>No. Miners dig on their own. What you decide is which wallet is in the mine and when to leave. You can change the camera and the level you are watching.</p></details>
+<details><summary>My miner found a reward but I was not paid. Why?</summary><p>Common reasons: your balance fell below the minimum holding, your wallet hit its daily limit, payouts are paused, the hourly payout limit was reached, or the payment itself failed. In those cases the reward goes back into hiding on the same level, so someone can find it later. The activity log in the mine shows a message when this happens.</p></details>
+<details><summary>Why am I waiting in line?</summary><p>The mine fits a limited number of miners. Anyone who leaves goes to the back of the line. If a token is required, holding more gives you a better place. When shifts are on, the longest-running miners step out so others can take a turn.</p></details>
+<details><summary>Why was I removed from the mine?</summary><p>Usually because your balance dropped below the minimum, your shift ended, your connection dropped for a while, or the admin removed the wallet. The message shown on the page says which.</p></details>
+<details><summary>Can I use more than one wallet?</summary><p>Each wallet can only be in the mine once, and each internet connection can run a limited number of miners. After leaving, a connection has to wait a few minutes before mining with a different wallet. The exact limits are on the <a href="/rules.html">rules</a> page.</p></details>
+<details><summary>Can the rewards run out?</summary><p>Yes. The pool is a fixed amount. When every reward is found, the game waits for more funds to arrive. When a season ends, whatever is left goes back to the pool owner.</p></details>
+<details><summary>Are payments final?</summary><p>Yes. They are normal on-chain transfers and cannot be reversed. Check your address before you enter it.</p></details>
+<details><summary>Is this a real-money game?</summary><p>Only when the page says mainnet. In test mode (devnet) the rewards have no value at all. Nothing here is financial advice, and you should only play with amounts you are fine losing. Make sure the game is lawful where you live.</p></details>
+<a class="cta" href="/">Back to the mine</a>
+<script>
+function $(i){return document.getElementById(i)}
+var S=null;
+function f(x){var d=S.asset.dec||9;return (x/Math.pow(10,d)).toLocaleString('en-US',{maximumFractionDigits:S.asset.token?0:4})+' '+S.asset.sym}
+function put(id,t){var e=$(id);if(e)e.textContent=t}
+fetch('/api/state').then(function(r){return r.json()}).then(function(s){S=s;
+put('net',s.network==='mainnet'?'Live on Solana mainnet.':'Test mode on Solana devnet: rewards have no real value.');
+}).catch(function(){});
+</script></main></body></html>
