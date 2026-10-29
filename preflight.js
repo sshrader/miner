@@ -11,7 +11,7 @@ const ok = (m) => console.log('  ok    ' + m);
 const no = (m) => { bad++; console.log('  FAIL  ' + m); };
 const wn = (m) => { warn++; console.log('  warn  ' + m); };
 (async () => {
-  console.log('Bedrock Bots preflight, network: ' + NETWORK + '\n');
+  console.log('Rock Bottom Rewards preflight, network: ' + NETWORK + '\n');
   MAINNET ? (process.env.CONFIRM_MAINNET === 'yes-i-am-using-real-funds' ? ok('CONFIRM_MAINNET is set') : no('CONFIRM_MAINNET=yes-i-am-using-real-funds is missing')) : wn('NETWORK is devnet: nothing here is real money');
   const key = process.env.ADMIN_KEY || '';
   key.length >= 24 ? ok('ADMIN_KEY is ' + key.length + ' characters') : no('ADMIN_KEY must be at least 24 characters (never reuse one that was pasted anywhere)');
