@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 150" role="img" aria-label="Pay Dirt: a robot miner pushing a cart of gold">
+<g stroke-linecap="round" fill="none">
+<line x1="8" y1="134" x2="292" y2="134" stroke="#f2b632" stroke-width="4"/>
+<path d="M24 134 L24 142 M64 134 L64 142 M104 134 L104 142 M144 134 L144 142 M184 134 L184 142 M224 134 L224 142 M264 134 L264 142" stroke="#7a5532" stroke-width="4"/>
+<path d="M18 112 L34 112 M10 122 L30 122 M22 100 L32 100" stroke="#7a5532" stroke-width="3"/>
+</g>
+<line x1="84" y1="82" x2="118" y2="92" stroke="#c9c2b4" stroke-width="6" stroke-linecap="round"/>
+<line x1="84" y1="90" x2="118" y2="98" stroke="#8f8574" stroke-width="6" stroke-linecap="round"/>
+<g stroke-linecap="round">
+<line x1="60" y1="104" x2="46" y2="128" stroke="#6b5f4c" stroke-width="9"/>
+<line x1="80" y1="104" x2="92" y2="126" stroke="#8f8574" stroke-width="9"/>
+</g>
+<ellipse cx="44" cy="131" rx="9" ry="4" fill="#f6ecd6"/>
+<ellipse cx="96" cy="130" rx="9" ry="4" fill="#f6ecd6"/>
+<rect x="50" y="72" width="40" height="34" rx="9" fill="#a79d8a"/>
+<rect x="60" y="82" width="20" height="8" rx="2" fill="#6b5f4c"/>
+<rect x="52" y="44" width="36" height="28" rx="9" fill="#c9c2b4"/>
+<circle cx="64" cy="58" r="4.5" fill="#17130e"/>
+<circle cx="78" cy="58" r="4.5" fill="#17130e"/>
+<circle cx="65.5" cy="56.5" r="1.5" fill="#f2b632"/>
+<circle cx="79.5" cy="56.5" r="1.5" fill="#f2b632"/>
+<path d="M48 44 A22 20 0 0 1 92 44 Z" fill="#f2b632"/>
+<rect x="46" y="42" width="48" height="6" rx="3" fill="#d98f0a"/>
+<circle cx="88" cy="34" r="5" fill="#fff1c4" stroke="#17130e" stroke-width="2"/>
+<path d="M96 30 L104 26 M98 36 L108 36 M96 42 L104 46" stroke="#fff1c4" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M118 78 L216 78 L206 118 L128 118 Z" fill="#d8d2c4" stroke="#8f8574" stroke-width="3" stroke-linejoin="round"/>
+<rect x="112" y="72" width="110" height="9" rx="3" fill="#f6ecd6" stroke="#8f8574" stroke-width="2"/>
+<line x1="124" y1="98" x2="210" y2="98" stroke="#8f8574" stroke-width="2.5"/>
+<path d="M124 72 L132 54 L146 50 L152 62 L146 72 Z" fill="#f2b632"/>
+<path d="M132 54 L146 50 L148 58 L136 60 Z" fill="#fff0b8"/>
+<path d="M146 72 L154 48 L170 44 L178 58 L172 72 Z" fill="#e0a21e"/>
+<path d="M154 48 L170 44 L170 54 L158 56 Z" fill="#fff0b8"/>
+<path d="M172 72 L180 52 L196 50 L204 64 L198 72 Z" fill="#f2b632"/>
+<path d="M180 52 L196 50 L194 58 L184 60 Z" fill="#fff0b8"/>
+<path d="M156 46 L164 34 L178 34 L182 46 Z" fill="#f2b632"/>
+<path d="M164 34 L178 34 L177 41 L166 42 Z" fill="#fff0b8"/>
+<circle cx="146" cy="124" r="11" fill="#17130e" stroke="#d8d2c4" stroke-width="4"/>
+<circle cx="194" cy="124" r="11" fill="#17130e" stroke="#d8d2c4" stroke-width="4"/>
+<circle cx="146" cy="124" r="3" fill="#f2b632"/>
+<circle cx="194" cy="124" r="3" fill="#f2b632"/>
+<path d="M214 34 L218 28 M228 44 L236 42 M206 22 L206 14" stroke="#fff0b8" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

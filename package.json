@@ -2,7 +2,7 @@
   "name": "bedrock-bots-devnet",
   "version": "0.1.0",
   "private": true,
-  "description": "Rock Bottom Rewards: a 3D mining game that pays test rewards in Solana DEVNET SOL from a throwaway wallet.",
+  "description": "Pay Dirt: a 3D mining game that pays test rewards in Solana DEVNET SOL from a throwaway wallet.",
   "scripts": {
     "start": "node server.js",
     "dry": "node server.js --dry-run",

@@ -1,5 +1,5 @@
 'use strict';
-// Rock Bottom Rewards devnet server. DEVNET ONLY.
+// Pay Dirt devnet server. DEVNET ONLY.
 // Holds a throwaway keypair (reward-wallet.json), decides rewards, and pays them to the connected wallet.
 // Binds to 127.0.0.1 so only this computer can reach it.
 
@@ -604,7 +604,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/challenge' && req.method === 'POST') {
       const body = await readBody(req);
       let a; try { a = checkAddr(String(body.address)); } catch (e) { return send(res, 400, { error: 'Invalid wallet address' }); }
-      const message = 'Rock Bottom Rewards ' + NETWORK + ': I want to mine with wallet ' + a + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
+      const message = 'Pay Dirt ' + NETWORK + ': I want to mine with wallet ' + a + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
       if (challenges.size > 5000) challenges.clear();
       challenges.set(a, { message, at: Date.now() });
       return send(res, 200, { message });
@@ -716,7 +716,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const sess = sessions.get(String(body.sessionId));
       if (!sess) return send(res, 404, { error: 'Unknown session' });
-      sess.challenge = 'Rock Bottom Rewards ' + NETWORK + ': I own wallet ' + sess.address + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
+      sess.challenge = 'Pay Dirt ' + NETWORK + ': I own wallet ' + sess.address + '. Nonce ' + crypto.randomBytes(8).toString('hex') + '. This is a message, not a transaction.';
       return send(res, 200, { message: sess.challenge });
     }
     if (url.pathname === '/api/verify' && req.method === 'POST') {
@@ -837,7 +837,7 @@ const server = http.createServer(async (req, res) => {
   server.listen(PORT, HOST, () => {
     if (HOST !== '127.0.0.1' && !MAX_PER_IP) console.log('WARNING: the server is reachable from outside but MAX_PER_IP is not set.');
     console.log('');
-    console.log('Rock Bottom Rewards (' + NETWORK + ') running at http://127.0.0.1:' + PORT);
+    console.log('Pay Dirt (' + NETWORK + ') running at http://127.0.0.1:' + PORT);
     console.log('Admin link (keep private): ' + (ALLOWED_ORIGINS[0] || 'http://127.0.0.1:' + PORT) + '/#admin=' + ADMIN_KEY);
     console.log('Reward wallet (send ' + NETWORK.toUpperCase() + ' ' + (TOKEN_MODE ? TOKEN_SYMBOL + ' and a little SOL for fees' : 'SOL') + ' here): ' + payer.publicKey.toBase58());
     if (pool.total === 0) console.log(TOKEN_MODE ? 'The pool is empty. Send the token (node make-token.js does this) and some SOL to the reward wallet; the pool builds itself.' : 'The wallet needs devnet SOL. Fund it at https://faucet.solana.com (network: devnet); the pool builds itself.');

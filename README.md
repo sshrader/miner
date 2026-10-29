@@ -1,4 +1,4 @@
-# Rock Bottom Rewards (devnet test)
+# Pay Dirt (devnet test)
 
 A 3D mining game. Your miner digs through an eight-level cave, each level with its own irregular outline,, and hidden blocks pay real **devnet** SOL
 from a throwaway wallet to the Phantom wallet you connect. Devnet SOL has no value.
