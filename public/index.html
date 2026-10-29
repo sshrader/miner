@@ -101,6 +101,8 @@ canvas:active { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
 .gate { position: absolute; z-index: 6; inset: 0; overflow-y: auto; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(6, 5, 10, 0.62); }
 .gate[hidden] { display: none; }
+.joinfloat { position: absolute; z-index: 5; top: 12px; right: 12px; }
+.joinfloat[hidden] { display: none; }
 .gate-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
 .gate-card h2 { margin: 0; font: 700 24px/1.1 var(--font-display); }
 .gate-card p { margin: 0; color: var(--muted); font-size: 15px; }
@@ -222,11 +224,13 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
               <input id="pasteAddr" autocomplete="off" spellcheck="false" placeholder="Your Solana address" maxlength="44">
               <button class="btn btn-ghost" type="submit">Start with this address</button>
             </form>
+            <button class="btn btn-ghost" id="watchBtn" type="button">Just watch, no wallet needed</button>
             <button class="btn btn-ghost" id="demoBtn" type="button">Try demo mode</button>
             <p class="msg" id="msg" role="status" hidden></p>
             <a id="installLink" href="https://phantom.app/" target="_blank" rel="noopener" hidden>Get Phantom</a>
           </div>
         </div>
+        <button class="btn btn-primary btn-sm joinfloat" id="joinBtn" type="button" hidden>Join the mine</button>
       </div>
       <p class="fine">Connecting (or pasting) shares your public address only. Phantom is never asked to approve a transaction. The optional wallet check signs a short text message.</p>
     </section>
@@ -371,7 +375,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     $('installLink').hidden = !withInstall;
   }
   function fail(text) {
-    $('gate').hidden = false; $('connectBtn').hidden = true; $('demoBtn').hidden = true;
+    $('gate').hidden = false; $('connectBtn').hidden = true; $('demoBtn').hidden = true; $('watchBtn').hidden = true;
     showMsg(text, false);
   }
   if (!window.THREE) { fail('The 3D engine did not load. Check your connection and reload the page.'); return; }
@@ -1218,6 +1222,16 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
   // The mine is full: wait in line. Holding more of the token and waiting longer both move you up.
   var qTicket = null, qTimer = null;
+  // Spectator mode: close the sign-in card and just watch the live mine. Nothing is sent to the server.
+  var watching = false;
+  function syncWatch() {
+    var open = $('gate').hidden && !session;
+    $('joinBtn').hidden = !open;
+    if (!session) $('walletAddr').textContent = open ? 'Just watching' : 'Not connected';
+  }
+  new MutationObserver(syncWatch).observe($('gate'), { attributes: true, attributeFilter: ['hidden'] });
+  $('watchBtn').addEventListener('click', function () { watching = true; $('gate').hidden = true; cam.follow = false; syncCamBtns(); });
+  $('joinBtn').addEventListener('click', function () { $('gate').hidden = false; });
   function gateReset() {
     if (qTimer) { clearInterval(qTimer); qTimer = null; }
     qTicket = null;
