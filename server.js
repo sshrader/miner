@@ -863,6 +863,7 @@ const server = http.createServer(async (req, res) => {
       try { await applyToken(body); } catch (e) { return send(res, 400, { error: String((e && e.message) || e) }); }
       for (const sid of Array.from(sessions.keys())) kick(sid, 'The reward token was set. Join again to mine for ' + TOKEN_SYMBOL + '.');
       queue.clear();
+      ipLast.clear();   // an admin rebuild is not the miners' doing, so nobody is held to their old address
       paidBy.clear(); recentPays.length = 0; failStreak = 0;
       await buildPool();   // the pool is rebuilt in the new token
       emitAll({ e: 'token', sym: TOKEN_SYMBOL });
