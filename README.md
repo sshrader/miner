@@ -67,6 +67,15 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 - Rewards are only paid when the server itself sees a miner break the block that holds one, so the browser cannot ask for one.
 
 
+## Setting the token from the page (launch day)
+
+Once the coin exists you do not have to redeploy. Open `/#admin=<ADMIN_KEY>`, press **Set token (admin)**, paste the contract address (CA), the ticker, and the limits, and submit. The server checks that the mint exists on the network you are on, reads its decimals, removes everyone from the mine, rebuilds the pool in that token from what the reward wallet holds, and saves the choice in `STATE_FILE` so a restart keeps it. Send the token (and a little SOL for fees) to the reward wallet first, or the pool will be empty until it arrives.
+
+- It works on devnet by default. **On mainnet it is off** unless you set `ALLOW_RUNTIME_TOKEN=1`; remove that setting again after launch if you like.
+- A second change needs the "replace" box ticked, and is refused while a payout is still being sent.
+- The same call is `POST /api/set-token` with the admin key and `{ mint, symbol, minHold, minReward, maxWallet, poolTokens, replace }`.
+- Anyone holding the admin key can point payouts at a different token, so keep the key private. The reward wallet only ever holds what you put in it.
+
 ## Mine 2 (overflow mine)
 
 There are two mines sharing one reward pool. Mine 1 is always open. Mine 2 starts closed; the admin opens it with the **Open Mine 2 (admin)** button (or `POST /api/mine-open {"open": true}` with the admin key). Open it and about half of the hidden rewards on every level move into it. People are placed in Mine 1 first, and in Mine 2 only when Mine 1 is full; nobody chooses. Each mine has its own cave, level locks and block hardness, and a viewer can switch the watched mine with the tabs under "Miners underground".

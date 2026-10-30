@@ -45,20 +45,21 @@ if (!DRY_RUN) ({ Connection, Keypair, PublicKey, SystemProgram, Transaction, sen
 //   MIN_REWARD_TOKENS  smallest single reward (default 1)
 //   MAX_WALLET_PAYOUT  most tokens one wallet can win per 24 hours (0 = no cap)
 // A dry run can pretend with DRY_TOKEN=1 (fake balances are set by the admin, see README).
-const TOKEN_MINT = (process.env.TOKEN_MINT || '').trim();
+let TOKEN_MINT = (process.env.TOKEN_MINT || '').trim();
 const DRY_TOKEN = DRY_RUN && process.env.DRY_TOKEN === '1';
-const TOKEN_MODE = !!TOKEN_MINT || DRY_TOKEN;
+let TOKEN_MODE = !!TOKEN_MINT || DRY_TOKEN;
 if (TOKEN_MINT && DRY_RUN) { console.error('TOKEN_MINT cannot be used with a dry run. Use DRY_TOKEN=1 to pretend.'); process.exit(1); }
-const TOKEN_SYMBOL = (process.env.TOKEN_SYMBOL || (TOKEN_MODE ? 'TOKEN' : 'SOL')).replace(/[^A-Za-z0-9$]/g, '').slice(0, 10) || 'TOKEN';
+let TOKEN_SYMBOL = (process.env.TOKEN_SYMBOL || (TOKEN_MODE ? 'TOKEN' : 'SOL')).replace(/[^A-Za-z0-9$]/g, '').slice(0, 10) || 'TOKEN';
 let spl = null;
 if (TOKEN_MINT) spl = require('@solana/spl-token');
 let DEC = TOKEN_MODE ? 6 : 9;           // replaced by the mint's real decimals at startup
 let tokenProgram = null;                // classic Token program or Token-2022, detected from the mint
 let mintKey = null;
 const UI = () => Math.pow(10, DEC);
-const MIN_HOLD_UI = Math.max(0, Number(process.env.MIN_HOLD) || 0);
-const MAX_WALLET_PAYOUT_UI = Math.max(0, Number(process.env.MAX_WALLET_PAYOUT) || 0);
-const HOLD_REQUIRED = TOKEN_MODE && MIN_HOLD_UI > 0;
+let MIN_HOLD_UI = Math.max(0, Number(process.env.MIN_HOLD) || 0);
+let MAX_WALLET_PAYOUT_UI = Math.max(0, Number(process.env.MAX_WALLET_PAYOUT) || 0);
+let HOLD_REQUIRED = TOKEN_MODE && MIN_HOLD_UI > 0;
+let runtimeToken = false;   // true when the admin set the token from the page instead of TOKEN_MINT
 // By default anyone can paste an address and mine (rewards go to that address, so borrowing someone else's gains nothing).
 // REQUIRE_SIGNATURE=1 makes every miner prove ownership with a wallet signature instead.
 const REQUIRE_SIGNATURE = process.env.REQUIRE_SIGNATURE === '1';
@@ -278,6 +279,32 @@ async function buildPool() {
 // Money that reached the reward wallet after the pool was built (creator fees, say) becomes new hidden rewards.
 let TOPUP_MIN = Math.round((Number(process.env.TOPUP_MIN_SOL) || 0.01) * LAMPORTS_PER_SOL);
 function configureTopup() { if (TOKEN_MODE) TOPUP_MIN = Math.round((Number(process.env.TOPUP_MIN_TOKENS) || 10 * (MIN_REWARD / UI())) * UI()); }
+// Sets (or replaces) the reward token while the server runs, so the contract address can be entered the moment a coin exists.
+// Everything is checked on the network first; nothing changes unless the mint is real.
+async function applyToken(cfg) {
+  const mint = String(cfg.mint || '').trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) throw new Error('That does not look like a token address (CA).');
+  const num = (x) => { const n = Number(x); if (x === '' || x == null) return 0; if (!isFinite(n) || n < 0) throw new Error('Numbers must be zero or more.'); return n; };
+  const minHold = num(cfg.minHold), minReward = num(cfg.minReward), maxWallet = num(cfg.maxWallet), poolTokens = num(cfg.poolTokens);
+  const symbol = String(cfg.symbol || '').replace(/[^A-Za-z0-9$]/g, '').slice(0, 10) || 'TOKEN';
+  let dec = 6, key = null, prog = null, ata = null, lib = null;
+  if (!DRY_RUN) {
+    lib = require('@solana/spl-token');
+    key = new PublicKey(mint);
+    const info = await connection.getAccountInfo(key, 'confirmed');
+    if (!info) throw new Error('That mint does not exist on ' + NETWORK + '. Check the address and the network.');
+    prog = info.owner;
+    try { dec = (await lib.getMint(connection, key, 'confirmed', prog)).decimals; } catch (e) { throw new Error('That address is not a token mint.'); }
+    ata = lib.getAssociatedTokenAddressSync(key, payer.publicKey, true, prog);
+  }
+  TOKEN_MINT = mint; TOKEN_MODE = true; TOKEN_SYMBOL = symbol; DEC = dec;
+  if (!DRY_RUN) { spl = lib; mintKey = key; tokenProgram = prog; payerAta = ata; }
+  MIN_HOLD_UI = minHold; MAX_WALLET_PAYOUT_UI = maxWallet; HOLD_REQUIRED = minHold > 0;
+  process.env.MIN_REWARD_TOKENS = String(minReward || ''); process.env.POOL_TOKENS = poolTokens ? String(poolTokens) : '';
+  runtimeToken = true;
+  configureAsset(); configureTopup();
+  balanceCache = { at: 0, v: null }; solCache = { at: 0, v: null };
+}
 let toppingUp = false;
 async function topUp() {
   if (toppingUp || pool.total === 0 || inflight > 0 || seasonOver()) return;
@@ -384,6 +411,7 @@ function saveState() {
   if (!STATE_FILE) return;
   try {
     const st = {
+      token: runtimeToken ? { mint: TOKEN_MINT, symbol: TOKEN_SYMBOL, minHold: MIN_HOLD_UI, minReward: process.env.MIN_REWARD_TOKENS, maxWallet: MAX_WALLET_PAYOUT_UI, poolTokens: process.env.POOL_TOKENS } : null,
       v: 2, network: NETWORK, wallet: payer.publicKey.toBase58(), mint: TOKEN_MINT || null, savedAt: Date.now(),
       worlds: mines.map((m) => m.world.exportState()), mines: mines.map((m) => ({ open: m.open, unlockedLv: m.unlockedLv })), pool: { total: pool.total, left: pool.left, cells: Array.from(pool.cells.entries()) },
       avgReward, excess, paused, pauseReason, muted: Array.from(muted), paidBy: Array.from(paidBy.entries()), recentPays: recentPays.slice(),
@@ -800,7 +828,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { verified: true });
     }
     if (url.pathname === '/api/admin-check' && req.method === 'POST') return send(res, isAdmin(req) ? 200 : 403, { admin: isAdmin(req) });
-    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine' || url.pathname === '/api/mine-open') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
+    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine' || url.pathname === '/api/mine-open' || url.pathname === '/api/set-token') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
     if (url.pathname === '/api/dry-holder' && req.method === 'POST' && DRY_RUN) {
       const body = await readBody(req);
       dryHolders.set(String(body.address), Math.round((Number(body.amount) || 0) * UI()));
@@ -825,6 +853,21 @@ const server = http.createServer(async (req, res) => {
       await buildPool();   // fresh rewards in the new caves, level locks reset
       emitAll({ e: 'newmine' });
       console.log('Admin built a new mine');
+      return send(res, 200, await state());
+    }
+    if (url.pathname === '/api/set-token' && req.method === 'POST') {
+      if (MAINNET && process.env.ALLOW_RUNTIME_TOKEN !== '1') return send(res, 403, { error: 'On mainnet, setting the token from the page is off. Set ALLOW_RUNTIME_TOKEN=1 (or TOKEN_MINT) in the server settings first.' });
+      const body = await readBody(req);
+      if (TOKEN_MODE && !DRY_TOKEN && !body.replace) return send(res, 409, { error: 'A token is already set (' + TOKEN_SYMBOL + '). Tick "replace" to change it.' });
+      if (inflight > 0) return send(res, 409, { error: 'A payout is still being sent. Try again in a few seconds.' });
+      try { await applyToken(body); } catch (e) { return send(res, 400, { error: String((e && e.message) || e) }); }
+      for (const sid of Array.from(sessions.keys())) kick(sid, 'The reward token was set. Join again to mine for ' + TOKEN_SYMBOL + '.');
+      queue.clear();
+      paidBy.clear(); recentPays.length = 0; failStreak = 0;
+      await buildPool();   // the pool is rebuilt in the new token
+      emitAll({ e: 'token', sym: TOKEN_SYMBOL });
+      saveState();
+      console.log('Admin set the reward token: ' + TOKEN_SYMBOL + ' ' + TOKEN_MINT + ' (' + DEC + ' decimals)');
       return send(res, 200, await state());
     }
     if (url.pathname === '/api/mine-open' && req.method === 'POST') {
@@ -873,7 +916,13 @@ const server = http.createServer(async (req, res) => {
       console.warn('Could not reach the RPC to verify devnet (' + RPC_URL + '). Continuing; payouts will fail until it is reachable.');
     }
   }
-  if (TOKEN_MINT) {
+  if (!TOKEN_MINT && STATE_FILE && fs.existsSync(STATE_FILE)) {   // a token the admin set from the page survives restarts
+    try {
+      const t = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')).token;
+      if (t && t.mint && JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')).network === NETWORK) { await applyToken(t); console.log('Restored the reward token set from the page: ' + TOKEN_SYMBOL + ' ' + TOKEN_MINT); }
+    } catch (e) { console.log('Could not restore the saved token (' + e.message + '); starting without it.'); }
+  }
+  if (TOKEN_MINT && !runtimeToken) {
     try {
       mintKey = new PublicKey(TOKEN_MINT);
       const info = await connection.getAccountInfo(mintKey, 'confirmed');

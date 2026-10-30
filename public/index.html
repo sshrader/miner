@@ -262,7 +262,25 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <button class="btn btn-ghost btn-sm" id="pauseBtn" type="button" hidden>Pause payouts (admin)</button>
           <button class="btn btn-ghost btn-sm" id="newMineBtn" type="button" hidden>New mine (admin)</button>
           <button class="btn btn-ghost btn-sm" id="mine2Btn" type="button" hidden>Open Mine 2 (admin)</button>
+          <button class="btn btn-ghost btn-sm" id="tokenBtn" type="button" hidden>Set token (admin)</button>
         </div>
+        <form class="pasteform" id="tokenForm" hidden>
+          <label for="tkMint">Token address (CA)</label>
+          <input id="tkMint" autocomplete="off" spellcheck="false" placeholder="Contract address of the coin" maxlength="44">
+          <label for="tkSym">Ticker shown on the page</label>
+          <input id="tkSym" autocomplete="off" placeholder="PAYDIRT" maxlength="10">
+          <label for="tkHold">Tokens a wallet must hold to mine (0 = none)</label>
+          <input id="tkHold" inputmode="decimal" value="0">
+          <label for="tkMin">Smallest single reward, in tokens (0 = default 1)</label>
+          <input id="tkMin" inputmode="decimal" value="0">
+          <label for="tkCap">Most one wallet can win per day, in tokens (0 = no cap)</label>
+          <input id="tkCap" inputmode="decimal" value="0">
+          <label for="tkPool">Most tokens to put in the pool (0 = everything the reward wallet holds)</label>
+          <input id="tkPool" inputmode="decimal" value="0">
+          <label><input type="checkbox" id="tkRep" style="min-height:0"> Replace the token that is already set</label>
+          <button class="btn btn-sm" type="submit" id="tkGo">Set token and rebuild the pool</button>
+          <div class="unit" id="tkMsg">This checks the address on the network, removes everyone from the mine, and builds a new pool in this token from what the reward wallet holds.</div>
+        </form>
         <div class="unit" id="devNote"></div>
       </div>
 
@@ -1424,6 +1442,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     } else if (e.e === 'topup') {
       log('Reward pool topped up: +' + fmt(e.amt) + ' in ' + e.n + ' new hidden ' + (e.n === 1 ? 'reward' : 'rewards') + '.', 'win');
       api('/api/state').then(adopt).catch(function () {});
+    } else if (e.e === 'token') {
+      log('The reward token is now ' + e.sym + '. Everyone left the mine; join again to mine for it.', 'win');
+      api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'newmine') {
       log('The admin built a new mine. Everyone is back at the elevator.', 'win');
       api('/api/state').then(adopt).catch(function () {});
@@ -1930,7 +1951,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (o) { o.setAttribute('aria-pressed', o === btn ? 'true' : 'false'); });
     });
   });
-  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; $('mine2Btn').hidden = false; renderMineTabs(); }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
+  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; $('mine2Btn').hidden = false; $('tokenBtn').hidden = false; renderMineTabs(); }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
   $('newPoolBtn').addEventListener('click', function () {
     api('/api/reset-pool', {}).then(function (s) { adopt(s); $('msg').hidden = true; log('New reward pool: ' + fmt(s.poolTotal) + ' in ' + s.rewardsLeft + ' hidden rewards.'); })
       .catch(function (e) { log('Could not reset the pool: ' + e.message, 'sim'); });
@@ -1946,6 +1967,15 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     clearTimeout(nmArm); nmArm = null; b.textContent = 'New mine (admin)';
     api('/api/new-mine', {}).then(function (s) { adopt(s); log('New mine built: ' + s.rewardsLeft + ' hidden rewards, levels locked again.'); })
       .catch(function (e) { log('Could not build a new mine: ' + e.message, 'sim'); });
+  });
+  $('tokenBtn').addEventListener('click', function () { $('tokenForm').hidden = !$('tokenForm').hidden; });
+  $('tokenForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var go = $('tkGo'), msg = $('tkMsg'); go.disabled = true; msg.textContent = 'Checking the address on the network...';
+    api('/api/set-token', { mint: $('tkMint').value, symbol: $('tkSym').value, minHold: $('tkHold').value, minReward: $('tkMin').value, maxWallet: $('tkCap').value, poolTokens: $('tkPool').value, replace: $('tkRep').checked })
+      .then(function (s) { adopt(s); msg.textContent = 'Done. ' + s.asset.sym + ' is set and the pool is rebuilt (' + s.rewardsLeft + ' hidden rewards).'; log('Reward token set: ' + s.asset.sym + '.', 'win'); })
+      .catch(function (e) { msg.textContent = 'Not set: ' + e.message; })
+      .then(function () { go.disabled = false; });
   });
   $('mine2Btn').addEventListener('click', function () {
     var open = !(DEV && DEV.mines && DEV.mines[1] && DEV.mines[1].open);
