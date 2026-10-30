@@ -67,6 +67,12 @@ Dry run needs no `npm install` and sends nothing: payouts are fake signatures. I
 - Rewards are only paid when the server itself sees a miner break the block that holds one, so the browser cannot ask for one.
 
 
+## Mine 2 (overflow mine)
+
+There are two mines sharing one reward pool. Mine 1 is always open. Mine 2 starts closed; the admin opens it with the **Open Mine 2 (admin)** button (or `POST /api/mine-open {"open": true}` with the admin key). Open it and about half of the hidden rewards on every level move into it. People are placed in Mine 1 first, and in Mine 2 only when Mine 1 is full; nobody chooses. Each mine has its own cave, level locks and block hardness, and a viewer can switch the watched mine with the tabs under "Miners underground".
+
+Closing it (`{"open": false}`) stops new people entering Mine 2; the miners already there stay until they leave (`"kick": true` removes them), and when it is empty its rewards go back into Mine 1 (which can lock a level there again). The saved state file (`STATE_FILE`) now holds both mines; old v1 files still load.
+
 ## Level gating
 
 Miners cannot dig through a level's floor until **every reward hidden on that level has been found**. Level 1 opens first; finding its last reward unlocks level 2, and so on. Rewards only hide in walls (never floors), spread evenly over the 8 levels, with bigger shares deeper down. Simulated one-miner times to clear the whole mine: easy about 2 h, normal about 2 h, hard about 3 h, brutal about 4 h (more miners finish faster). Change `DIFFICULTY`, `REWARDS_PER_LEVEL` or `HARD_MULT` to tune it.

@@ -261,6 +261,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <button class="btn btn-ghost btn-sm" id="newPoolBtn" type="button" hidden>New pool (admin)</button>
           <button class="btn btn-ghost btn-sm" id="pauseBtn" type="button" hidden>Pause payouts (admin)</button>
           <button class="btn btn-ghost btn-sm" id="newMineBtn" type="button" hidden>New mine (admin)</button>
+          <button class="btn btn-ghost btn-sm" id="mine2Btn" type="button" hidden>Open Mine 2 (admin)</button>
         </div>
         <div class="unit" id="devNote"></div>
       </div>
@@ -310,6 +311,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
 
       <div class="card">
         <span class="lbl">Miners underground</span>
+        <div class="controls" id="mineTabs" role="group" aria-label="Choose a mine to watch" hidden></div>
         <ul class="miners" id="miners"><li class="empty">No miners yet.</li></ul>
         <div class="controls">
           <button class="btn btn-ghost btn-sm" id="addSim" type="button" disabled>Add simulated miner</button>
@@ -342,7 +344,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Change this to your ticker. It appears in the header and footer.
   var TICKER = '$PAYDIRT';
   var DEV = null;   // set when this page is served by server.js (devnet mode)
-  var netBots = {}, evtSrc = null, lastPoolKey = '', hardMult = 1;
+  var netBots = {}, evtSrc = null, lastPoolKey = '', hardMult = 1, viewMine = 1;
 
   // The mine: LV stacked levels, each X by Z cells. Wall cells are tall rock pillars (height PH) standing on a floor slab (thickness FT).
   // Digging a floor slab opens a shaft down to the next level.
@@ -1146,9 +1148,12 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     });
   }
   function adopt(s) {
-    var sid = DEV ? DEV.sessionId : null, ver = DEV ? !!DEV.verified : false;
-    DEV = s; DEV.sessionId = sid; DEV.verified = ver;
-    POOL_TOTAL = s.poolTotal; poolLeft = s.poolLeft; rewardsLeft = s.rewardsLeft; if (s.levelsLeft) gate = { open: s.unlocked, lv: s.levelsLeft };
+    var sid = DEV ? DEV.sessionId : null, ver = DEV ? !!DEV.verified : false, mid = DEV ? DEV.myId : null, mm = DEV ? DEV.myMine : null;
+    DEV = s; DEV.sessionId = sid; DEV.verified = ver; DEV.myId = mid; DEV.myMine = mm;
+    POOL_TOTAL = s.poolTotal; poolLeft = s.poolLeft; rewardsLeft = s.rewardsLeft;
+    var vm = s.mines && s.mines[viewMine - 1];
+    if (vm) gate = { open: vm.unlocked, lv: vm.levelsLeft }; else if (s.levelsLeft) gate = { open: s.unlocked, lv: s.levelsLeft };
+    renderMineTabs();
     $('devAddr').textContent = s.rewardWallet;
     $('devBal').textContent = s.balance == null ? 'RPC unreachable' : fmt(s.balance) + (isTok() && s.solBalance != null ? ' + ' + (s.solBalance / 1e9).toFixed(3) + ' SOL for fees' : '');
     $('devNote').textContent = s.dryRun ? 'Dry run: no transactions are sent, payouts are fake.' :
@@ -1159,6 +1164,35 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     if (s.needsFunding && !session) showMsg('The reward pool is not funded yet. Check back soon.', false);
     if (s.maxMiners) $('minersNote').textContent = 'Every connected wallet mines the same cave, live. Up to ' + s.maxMiners + ' miners at once' + (s.queueLength ? ', ' + s.queueLength + ' waiting in line.' : '.') + (s.shiftMinutes ? ' Shifts last ' + s.shiftMinutes + ' minutes when others are waiting.' : '');
     updatePool();
+  }
+  // Mine 1 is always open. Mine 2 is an overflow mine the admin can open for people who would otherwise wait in line.
+  function renderMineTabs() {
+    var box = $('mineTabs'), ms = DEV && DEV.mines;
+    if (!box || !ms || ms.length < 2) return;
+    var show = ms[1].open || viewMine === 2 || DEV.myMine === 2 || !!adminKey;
+    box.hidden = !show;
+    box.textContent = '';
+    ms.forEach(function (m) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn btn-ghost btn-sm';
+      b.setAttribute('aria-pressed', String(viewMine === m.n));
+      b.textContent = 'Mine ' + m.n + ': ' + (m.open ? 'Open' : 'Closed') + (m.miners ? ' (' + m.miners + '/' + m.max + ')' : '');
+      if (!m.open && viewMine !== m.n) b.disabled = true;
+      b.addEventListener('click', function () { switchMine(m.n); });
+      box.appendChild(b);
+    });
+    var mb = $('mine2Btn');
+    if (mb) mb.textContent = ms[1].open ? 'Close Mine 2 (admin)' : 'Open Mine 2 (admin)';
+  }
+  function switchMine(n) {
+    if (n === viewMine && evtSrc) return;
+    viewMine = n;
+    if (evtSrc) { evtSrc.close(); evtSrc = null; }
+    for (var k in netBots) { var g = netBots[k]; delete netBots[k]; if (g === player) player = null; if (followBot === g) followBot = null; removeBot(g); }
+    lastPoolKey = '';
+    renderMiners();
+    connectStream();
+    if (DEV) api('/api/state').then(adopt).catch(function () {});
   }
   function applyAssetLabels() {
     if (!DEV) return;
@@ -1215,7 +1249,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     });
   }
   function joined(addr, r, pasted) {
-    DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.verified = !!r.verified;
+    DEV.sessionId = r.sessionId; DEV.myId = r.minerId; DEV.myMine = r.mine || 1; DEV.verified = !!r.verified;
+    if (viewMine !== DEV.myMine) switchMine(DEV.myMine);
+    if (DEV.myMine === 2) log('Mine 1 was full, so you are in Mine 2. It has the same reward pool.', 'sim');
     $('verifyBtn').textContent = r.verified ? 'Verified \u2713' : 'Verify my wallet';
     startSession(addr, 'wallet');
     if (session) session.pasted = !!pasted;
@@ -1303,10 +1339,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   }
   function connectStream() {
     if (evtSrc) return;
-    evtSrc = new EventSource('/api/events');
+    evtSrc = new EventSource('/api/events?mine=' + viewMine);
     evtSrc.onmessage = function (e) {
       var m;
       try { m = JSON.parse(e.data); } catch (err) { return; }
+      if (m.mine && m.mine !== viewMine) return;
       if (m.t === 'world') loadWorld(m); else if (m.t === 'tick') netTick(m);
     };
   }
@@ -1318,7 +1355,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     });
   }
   function adoptPlayer() {
-    if (!DEV || !session || DEV.myId == null) return;
+    if (!DEV || !session || DEV.myId == null || (DEV.myMine || 1) !== viewMine) return;
     var b = netBots[DEV.myId];
     if (!b || b === player) return;
     player = b; b.kind = 'you'; b.name = 'You'; b.label = 'You (' + shortAddr(b.addr) + ')';
@@ -1893,7 +1930,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (o) { o.setAttribute('aria-pressed', o === btn ? 'true' : 'false'); });
     });
   });
-  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
+  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; $('mine2Btn').hidden = false; renderMineTabs(); }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
   $('newPoolBtn').addEventListener('click', function () {
     api('/api/reset-pool', {}).then(function (s) { adopt(s); $('msg').hidden = true; log('New reward pool: ' + fmt(s.poolTotal) + ' in ' + s.rewardsLeft + ' hidden rewards.'); })
       .catch(function (e) { log('Could not reset the pool: ' + e.message, 'sim'); });
@@ -1909,6 +1946,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     clearTimeout(nmArm); nmArm = null; b.textContent = 'New mine (admin)';
     api('/api/new-mine', {}).then(function (s) { adopt(s); log('New mine built: ' + s.rewardsLeft + ' hidden rewards, levels locked again.'); })
       .catch(function (e) { log('Could not build a new mine: ' + e.message, 'sim'); });
+  });
+  $('mine2Btn').addEventListener('click', function () {
+    var open = !(DEV && DEV.mines && DEV.mines[1] && DEV.mines[1].open);
+    api('/api/mine-open', { open: open }).then(function (s) { adopt(s); log(open ? 'Mine 2 is open: about half the hidden rewards moved into it.' : 'Mine 2 is closed. It empties as its miners leave, then its rewards go back to Mine 1.'); })
+      .catch(function (e) { log('Could not change Mine 2: ' + e.message, 'sim'); });
   });
   $('pauseBtn').addEventListener('click', function () {
     api('/api/pause', { paused: !(DEV && DEV.paused) }).then(function (s) { adopt(s); log(s.paused ? 'Payouts paused.' : 'Payouts resumed.'); })

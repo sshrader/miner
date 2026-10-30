@@ -196,7 +196,9 @@ function shuffle(a) {
 const { createWorld, SLOTS, NN, N } = require('./world');
 const LV = NN / N;
 let pool = { total: 0, left: 0, cells: new Map() };
-function levelOfKey(k) { return Math.floor((k >= NN ? k - NN : k) / N); }
+const MINE_SPAN = 2 * NN;   // reward keys: mine index * MINE_SPAN + (floor ? NN : 0) + cell
+function levelOfKey(k) { const q = k % MINE_SPAN; return Math.floor((q >= NN ? q - NN : q) / N); }
+function mineOfKey(k) { return Math.floor(k / MINE_SPAN); }
 let inflight = 0;     // rewards reserved for a payout that has not confirmed yet
 let excess = 0;       // balance above the configured pool when it was built; ignored by top-ups
 let avgReward = 0;
@@ -211,15 +213,48 @@ function splitAmounts(keys, total) {
   return amts;
 }
 const showAmt = (x) => (x / UI()).toFixed(TOKEN_MODE ? 2 : 4) + ' ' + TOKEN_SYMBOL;
-let unlockedLv = 0;   // deepest level miners may reach right now
-function levelCounts() { const c = new Array(LV).fill(0); pool.cells.forEach((_, k) => { c[levelOfKey(k)]++; }); return c; }
+// Two mines share one reward pool. Mine 1 is always open; Mine 2 is opened by the admin and only takes people when Mine 1 is full.
+const mines = [0, 1].map((i) => {
+  const mine = { i, off: i * MINE_SPAN, open: i === 0, unlockedLv: 0, curHard: HARD_MULT, clients: new Set(), world: null };
+  mine.world = createWorld({
+    rand: secureRand,
+    onDig: (m, info) => onDig(mine, m, info),
+    // The mine was dug out and rebuilt: hide this mine's remaining rewards in the new cave.
+    onRegen() {
+      const byLevel = Array.from({ length: LV }, () => []);
+      pool.cells.forEach((amt, k) => { if (mineOfKey(k) === mine.i) byLevel[levelOfKey(k)].push(amt); });
+      Array.from(pool.cells.keys()).forEach((k) => { if (mineOfKey(k) === mine.i) pool.cells.delete(k); });
+      putRewards(placeKeys(byLevel.map((a) => a.length), mine), [].concat(...byLevel));
+      recomputeUnlock(mine, true);
+    }
+  }, { hardMult: HARD_MULT });
+  return mine;
+});
+const emitAll = (ev) => mines.forEach((m) => m.world.emit(ev));
+const totalMiners = () => mines.reduce((a, m) => a + m.world.miners.size, 0);
+const totalClients = () => mines.reduce((a, m) => a + m.clients.size, 0);
+// The mine a newcomer joins: the first open one with a free place (Mine 1 first).
+const freeMine = () => mines.find((m) => m.open && m.world.miners.size < SLOTS) || null;
+// Picks hiding spots for `per[level]` rewards in the given mine (or spread over every open mine) and returns reward keys.
+function placeKeys(per, target) {
+  const ms = target ? [target] : mines.filter((m) => m.open);
+  const share = ms.map(() => new Array(LV).fill(0));
+  for (let l = 0; l < LV; l++) for (let i = 0; i < (per[l] | 0); i++) share[i % ms.length][l]++;
+  const out = [];
+  ms.forEach((m, j) => m.world.pickRewardCells(share[j]).forEach((g) => out.push(m.off + g)));
+  return out;
+}
+// Stores amounts at keys; if a spot already holds a reward the two are added together so no money is ever lost.
+function putRewards(keys, amts) { keys.forEach((k, i) => pool.cells.set(k, (pool.cells.get(k) || 0) + amts[i])); }
+function levelCounts(mine) { const c = new Array(LV).fill(0); pool.cells.forEach((_, k) => { if (!mine || mineOfKey(k) === mine.i) c[levelOfKey(k)]++; }); return c; }
 // A level opens the next one only when every reward hidden in it has been found.
-function recomputeUnlock(reset) {
-  const c = levelCounts();
+function recomputeUnlock(mine, reset) {
+  if (!mine) { mines.forEach((m) => recomputeUnlock(m, reset)); return; }
+  const c = levelCounts(mine);
   let u = 0;
   while (u < LV - 1 && c[u] === 0) u++;
-  if (reset) unlockedLv = u; else if (u > unlockedLv) { unlockedLv = u; world.emit({ e: 'unlock', lv: u + 1 }); console.log('Level ' + (u + 1) + ' unlocked'); }
-  world.setUnlocked(unlockedLv);
+  if (reset) mine.unlockedLv = u; else if (u > mine.unlockedLv) { mine.unlockedLv = u; mine.world.emit({ e: 'unlock', lv: u + 1 }); console.log('Mine ' + (mine.i + 1) + ': level ' + (u + 1) + ' unlocked'); }
+  mine.world.setUnlocked(mine.unlockedLv);
 }
 async function buildPool() {
   const bal = await getBalance(true);
@@ -229,14 +264,14 @@ async function buildPool() {
   if (count > 0) {
     const per = new Array(LV).fill(0);
     for (let i = 0; i < count; i++) per[i % LV]++;   // spread evenly; the top levels get any remainder
-    const keys = world.pickRewardCells(per);
+    const keys = placeKeys(per);
     const amts = splitAmounts(keys, total);
     keys.forEach((k, i) => cells.set(k, amts[i]));
   }
   pool = { total, left: total, cells };
   excess = bal == null ? 0 : Math.max(0, bal - RESERVE - total);
   avgReward = cells.size ? total / cells.size : 0;
-  recomputeUnlock(true);
+  recomputeUnlock(null, true);
   console.log(`Pool ready: ${showAmt(total)} hidden in ${cells.size} spots (difficulty ${DIFFICULTY}: ${PER_LEVEL} per level, blocks take ${HARD_MULT}x the hits, each level opens only when all its rewards are found)` + (DRY_RUN ? ' (dry run, nothing is sent)' : ''));
 }
 
@@ -254,14 +289,15 @@ async function topUp() {
     if (spare < TOPUP_MIN) return;
     const count = Math.max(1, Math.min(MAX_REWARDS, Math.round(spare / Math.max(avgReward, 2 * MIN_REWARD)), Math.floor(spare / (2 * MIN_REWARD))));
     const per = new Array(LV).fill(0), live = [];
-    for (let l = unlockedLv; l < LV; l++) live.push(l);
+    const lowLv = Math.min(...mines.filter((m) => m.open).map((m) => m.unlockedLv));
+    for (let l = lowLv; l < LV; l++) live.push(l);
     for (let i = 0; i < count; i++) per[live[i % live.length]]++;   // hidden on levels that are not cleared yet
-    const keys = world.pickRewardCells(per);
+    const keys = placeKeys(per);
     if (!keys.length) return;
     const amts = splitAmounts(keys, spare);
-    keys.forEach((k, i) => pool.cells.set(k, amts[i]));
+    putRewards(keys, amts);
     pool.total += spare; pool.left += spare;
-    world.emit({ e: 'topup', amt: spare, n: keys.length });
+    emitAll({ e: 'topup', amt: spare, n: keys.length });
     console.log(`Pool topped up: +${showAmt(spare)} in ${keys.length} new spots`);
   } finally { toppingUp = false; }
 }
@@ -290,10 +326,11 @@ async function state() {
     poolLeft: pool.left,
     rewardsLeft: pool.cells.size,
     needsFunding: pool.total === 0,
-    miners: world.miners.size,
-    maxMiners: SLOTS,
+    miners: totalMiners(),
+    maxMiners: SLOTS * Math.max(1, mines.filter((m) => m.open).length),
+    mines: mines.map((m) => ({ n: m.i + 1, open: m.open, miners: m.world.miners.size, max: SLOTS, unlocked: m.unlockedLv + 1, levelsLeft: levelCounts(m), rewards: levelCounts(m).reduce((a, b) => a + b, 0), hardMult: m.curHard })),
     queueLength: queue.size,
-    hardMult: curHard,
+    hardMult: mines[0].curHard,
     baseHardMult: HARD_MULT,
     autoScale: AUTO_SCALE,
     queueAgeMinutes: QUEUE_AGE_MS / 60000,
@@ -301,8 +338,8 @@ async function state() {
     difficulty: DIFFICULTY,
     seasonEnd: SEASON_END || null,
     seasonOver: seasonOver(),
-    unlocked: unlockedLv + 1,
-    levelsLeft: levelCounts(),
+    unlocked: mines[0].unlockedLv + 1,
+    levelsLeft: levelCounts(mines[0]),
     explorer
   };
 }
@@ -325,7 +362,6 @@ async function pay(address, amount) {
 }
 
 const sessions = new Map();
-const clients = new Set();
 function hashStr(s) { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
 
 // Called by the shared mine for every block or floor a miner breaks. The server alone decides which digs pay.
@@ -339,7 +375,7 @@ function setPaused(on, why) {
   if (paused === on) return;
   paused = on; pauseReason = on ? (why || 'Paused by the admin') : ''; failStreak = 0;
   console.log(on ? 'PAYOUTS PAUSED: ' + pauseReason : 'Payouts resumed');
-  try { world.emit({ e: on ? 'paused' : 'resumed', msg: pauseReason }); } catch (e) { /* ignore */ }
+  try { emitAll({ e: on ? 'paused' : 'resumed', msg: pauseReason }); } catch (e) { /* ignore */ }
 }
 const STATE_FILE = process.env.STATE_FILE || '';   // e.g. /data/state.json on a Railway volume; empty = nothing is saved
 const SAVE_EVERY_MS = 10000;
@@ -348,9 +384,9 @@ function saveState() {
   if (!STATE_FILE) return;
   try {
     const st = {
-      v: 1, network: NETWORK, wallet: payer.publicKey.toBase58(), mint: TOKEN_MINT || null, savedAt: Date.now(),
-      world: world.exportState(), pool: { total: pool.total, left: pool.left, cells: Array.from(pool.cells.entries()) },
-      avgReward, excess, unlockedLv, paused, pauseReason, muted: Array.from(muted), paidBy: Array.from(paidBy.entries()), recentPays: recentPays.slice(),
+      v: 2, network: NETWORK, wallet: payer.publicKey.toBase58(), mint: TOKEN_MINT || null, savedAt: Date.now(),
+      worlds: mines.map((m) => m.world.exportState()), mines: mines.map((m) => ({ open: m.open, unlockedLv: m.unlockedLv })), pool: { total: pool.total, left: pool.left, cells: Array.from(pool.cells.entries()) },
+      avgReward, excess, paused, pauseReason, muted: Array.from(muted), paidBy: Array.from(paidBy.entries()), recentPays: recentPays.slice(),
     };
     fs.mkdirSync(path.dirname(path.resolve(STATE_FILE)), { recursive: true });
     const tmp = STATE_FILE + '.tmp';
@@ -364,17 +400,24 @@ async function loadState() {
   if (!STATE_FILE || !fs.existsSync(STATE_FILE)) return false;
   try {
     const st = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    if (st.v !== 1 || st.network !== NETWORK || (!DRY_RUN && st.wallet !== payer.publicKey.toBase58()) || (st.mint || null) !== (TOKEN_MINT || null)) { console.log('Saved state belongs to a different wallet or network; starting fresh.'); return false; }
+    if ((st.v !== 1 && st.v !== 2) || st.network !== NETWORK || (!DRY_RUN && st.wallet !== payer.publicKey.toBase58()) || (st.mint || null) !== (TOKEN_MINT || null)) { console.log('Saved state belongs to a different wallet or network; starting fresh.'); return false; }
     const bal = await getBalance(true);
     if (bal == null) { console.log('Could not read the wallet balance; starting fresh instead of trusting the saved state.'); return false; }
     const left = Number(st.pool.left) || 0;
     if (left > bal - RESERVE) { console.log('The wallet holds less than the saved pool (it was swept or spent); starting fresh.'); return false; }
-    if (!world.importState(st.world)) { console.log('Saved cave is unreadable; starting fresh.'); return false; }
+    const saved = st.v === 2 ? st.worlds : [st.world];
+    if (!Array.isArray(saved) || !saved.length || !mines.every((m, i) => !saved[i] || m.world.importState(saved[i]))) { console.log('Saved cave is unreadable; starting fresh.'); return false; }
     pool = { total: Number(st.pool.total) || 0, left, cells: new Map(st.pool.cells.map(([k, v]) => [Number(k), Number(v)])) };
     avgReward = Number(st.avgReward) || 0;
     excess = Math.max(0, bal - RESERVE - left);   // anything above the saved pool counts as new money for top-ups
     excess = Math.min(excess, Number(st.excess) || 0);
-    unlockedLv = Number(st.unlockedLv) || 0; world.setUnlocked(unlockedLv); recomputeUnlock();
+    mines.forEach((m, i) => {
+      const ms = st.v === 2 ? (st.mines || [])[i] : (i === 0 ? { open: true, unlockedLv: st.unlockedLv } : null);
+      m.open = i === 0 || !!(ms && ms.open);
+      m.unlockedLv = ms ? Number(ms.unlockedLv) || 0 : 0;
+      m.world.setUnlocked(m.unlockedLv);
+    });
+    recomputeUnlock();
     paused = !!st.paused; pauseReason = st.pauseReason || '';
     (st.muted || []).forEach((a) => muted.add(a));
     (st.paidBy || []).forEach(([a, r]) => paidBy.set(a, r));
@@ -384,22 +427,22 @@ async function loadState() {
   } catch (e) { console.log('Could not read saved state (' + e.message + '); starting fresh.'); return false; }
 }
 const paidBy = new Map();   // address -> { amt, since } for the per-wallet cap
-function sessionOfMiner(id) { for (const [sid, s2] of sessions) if (s2.minerId === id) return [sid, s2]; return [null, null]; }
+function sessionOfMiner(mi, id) { for (const [sid, s2] of sessions) if (s2.mine === mi && s2.minerId === id) return [sid, s2]; return [null, null]; }
 class HoldError extends Error {}
-function onDig(m, info) {
-  const key = info.kind === 'floor' ? NN + info.g : info.g;
+function onDig(mine, m, info) {
+  const key = mine.off + (info.kind === 'floor' ? NN + info.g : info.g);
   const amt = pool.cells.get(key) || 0;
   if (!amt) return 0;
   if (paused) return 0;   // digging goes on, rewards stay hidden until payouts resume
   if (MAX_PER_HOUR_UI > 0 && hourTotal() + amt > MAX_PER_HOUR_UI * UI()) return 0;
-  const [sid, sess] = sessionOfMiner(m.id);
+  const [sid, sess] = sessionOfMiner(mine.i, m.id);
   // A wallet below the minimum holding, or over its cap, digs the block but the reward stays hidden for someone else.
   if (HOLD_REQUIRED && (!sess || sess.hold == null || sess.hold < MIN_HOLD)) return 0;
   let rec = paidBy.get(m.addr);
   if (!rec || Date.now() - rec.since > 86400000) { rec = { amt: 0, since: Date.now() }; paidBy.set(m.addr, rec); }
   if (MAX_WALLET_PAYOUT > 0 && rec.amt + amt > MAX_WALLET_PAYOUT) return 0;
   pool.cells.delete(key);
-  recomputeUnlock();
+  recomputeUnlock(mine);
   recentPays.push({ t: Date.now(), amt });
   pool.left -= amt;   // reserved right away so two miners can never be paid the same reward
   rec.amt += amt;
@@ -415,7 +458,7 @@ function onDig(m, info) {
     failStreak = 0;
     inflight -= amt;
     balanceCache.at = 0;
-    world.emit({ e: 'paid', by: m.id, amt, sig });
+    mine.world.emit({ e: 'paid', by: m.id, amt, sig });
     console.log(`Paid ${showAmt(amt)} to ${m.addr} ${sig}`);
   }).catch((err) => {
     inflight -= amt;
@@ -423,39 +466,26 @@ function onDig(m, info) {
     { const i = recentPays.findIndex((r) => r.amt === amt); if (i >= 0) recentPays.splice(i, 1); }
     pool.left += amt;
     const per = new Array(LV).fill(0); per[levelOfKey(key)] = 1;
-    const again = world.pickRewardCells(per);   // put the unpaid reward back into a fresh hiding spot on the same level
-    if (again.length) pool.cells.set(again[0], amt);
+    const again = placeKeys(per, mine);   // put the unpaid reward back into a fresh hiding spot on the same level of the same mine
+    if (again.length) putRewards(again, [amt]);
     const hold = err instanceof HoldError;
     const msg = hold ? err.message : 'Payout failed, will retry on a later dig: ' + String((err && err.message) || err).slice(0, 140);
-    world.emit({ e: 'perr', by: m.id, msg });
+    mine.world.emit({ e: 'perr', by: m.id, msg });
     console.error(msg);
     if (!(err instanceof HoldError) && ++failStreak >= FAIL_PAUSE) setPaused(true, 'Payouts paused automatically after ' + failStreak + ' failures in a row.');
     if (hold && sid) kick(sid, 'Removed from the mine: your ' + TOKEN_SYMBOL + ' balance is below the minimum.');
   });
   return amt;
 }
-const world = createWorld({
-  rand: secureRand,
-  onDig,
-  // The mine was dug out and rebuilt: hide the rewards that are left in the new cave.
-  onRegen() {
-    const byLevel = Array.from({ length: LV }, () => []);
-    pool.cells.forEach((amt, k) => byLevel[levelOfKey(k)].push(amt));
-    pool.cells.clear();
-    const keys = world.pickRewardCells(byLevel.map((a) => a.length));
-    const used = new Array(LV).fill(0);
-    keys.forEach((k) => { const l = levelOfKey(k); pool.cells.set(k, byLevel[l][used[l]++]); });
-    recomputeUnlock(true);
-  }
-}, { hardMult: HARD_MULT });
-let curHard = HARD_MULT;
 function scaleHardness() {
   if (!AUTO_SCALE) return;
-  const n = world.miners.size;
-  const target = Math.min(Math.max(HARD_MULT, HARD_CAP), HARD_MULT * Math.max(1, n / REF_MINERS));
-  const rounded = Math.round(Math.min(target, HARD_CAP) * 4) / 4;   // steps of 0.25 so it does not flicker
-  const next = Math.max(HARD_MULT, rounded);
-  if (Math.abs(next - curHard) >= 0.25) { curHard = next; world.setHardMult(curHard); console.log(`Block hardness x${curHard} for ${n} miners`); }
+  for (const mine of mines) {
+    const n = mine.world.miners.size;
+    const target = Math.min(Math.max(HARD_MULT, HARD_CAP), HARD_MULT * Math.max(1, n / REF_MINERS));
+    const rounded = Math.round(Math.min(target, HARD_CAP) * 4) / 4;   // steps of 0.25 so it does not flicker
+    const next = Math.max(HARD_MULT, rounded);
+    if (Math.abs(next - mine.curHard) >= 0.25) { mine.curHard = next; mine.world.setHardMult(next); console.log(`Mine ${mine.i + 1}: block hardness x${next} for ${n} miners`); }
+  }
 }
 
 const kicked = new Map();   // sessionId -> reason, so the page can say why
@@ -466,16 +496,52 @@ function dropSession(sid) {
   if (!sess) return;
   if (sess.ip) ipLast.set(sess.ip, { address: sess.address, at: Date.now() });
   sessions.delete(sid);
-  world.removeMiner(sess.minerId);
-  console.log('Miner ' + sess.minerId + ' left: ' + sess.address);
-  setImmediate(() => { promote().catch(() => {}); });   // a place just opened: let the next person in line in
+  mines[sess.mine].world.removeMiner(sess.minerId);
+  console.log('Miner ' + sess.minerId + ' left Mine ' + (sess.mine + 1) + ': ' + sess.address);
+  setImmediate(() => { settleMines(); promote().catch(() => {}); });   // a place just opened: let the next person in line in
 }
-function tickMsg(ev) {
-  return { t: 'tick', hm: curHard, m: world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: unlockedLv + 1, lv: levelCounts(), over: seasonOver() } };
+function tickMsg(mine, ev) {
+  return { t: 'tick', mine: mine.i + 1, hm: mine.curHard, m: mine.world.minersSnap(), ev, pool: { left: pool.left, rewards: pool.cells.size, unlocked: mine.unlockedLv + 1, lv: levelCounts(mine), over: seasonOver() } };
 }
-function broadcast(obj) {
+function broadcast(mine, obj) {
   const line = 'data: ' + JSON.stringify(obj) + '\n\n';
-  for (const c of clients) { try { c.write(line); } catch (e) { clients.delete(c); } }
+  for (const c of mine.clients) { try { c.write(line); } catch (e) { mine.clients.delete(c); } }
+}
+// Mine 2 was closed and the last miner left: its rewards go back into Mine 1.
+function settleMines() {
+  const m2 = mines[1];
+  if (m2.open || m2.world.miners.size > 0) return;
+  const moved = [];
+  pool.cells.forEach((amt, k) => { if (mineOfKey(k) === 1) moved.push([k, amt]); });
+  if (!moved.length) return;
+  const per = new Array(LV).fill(0);
+  moved.forEach(([k]) => { per[levelOfKey(k)]++; });
+  moved.sort((a, b) => levelOfKey(a[0]) - levelOfKey(b[0]));
+  moved.forEach(([k]) => pool.cells.delete(k));
+  putRewards(placeKeys(per, mines[0]), moved.map((x) => x[1]));
+  recomputeUnlock(mines[0], true);
+  console.log('Mine 2 is empty and closed: ' + moved.length + ' rewards went back into Mine 1');
+}
+// Opening Mine 2 moves about half of the hidden rewards on every level into it.
+function openMine2() {
+  const m2 = mines[1];
+  if (m2.open) return;
+  m2.open = true;
+  const byLevel = Array.from({ length: LV }, () => []);
+  pool.cells.forEach((amt, k) => { if (mineOfKey(k) === 0) byLevel[levelOfKey(k)].push(k); });
+  const take = [], amts = [];
+  for (let l = 0; l < LV; l++) {
+    const ks = byLevel[l];
+    for (let i = ks.length - 1; i > 0; i--) { const j = Math.floor(secureRand() * (i + 1)); const t = ks[i]; ks[i] = ks[j]; ks[j] = t; }
+    ks.slice(0, Math.floor(ks.length / 2)).forEach((k) => { take.push(k); });
+  }
+  const per = new Array(LV).fill(0);
+  take.forEach((k) => { per[levelOfKey(k)]++; amts.push(pool.cells.get(k)); pool.cells.delete(k); });
+  // amts were pushed in the same level order as per is filled by pickRewardCells (ascending level), so sort to match
+  const order = take.map((k, i) => [levelOfKey(k), amts[i]]).sort((a, b) => a[0] - b[0]);
+  putRewards(placeKeys(per, m2), order.map((x) => x[1]));
+  recomputeUnlock(null, true);
+  console.log('Mine 2 opened with ' + take.length + ' rewards');
 }
 
 // Chat: kept in memory, last 100 messages. Everyone connected to this server sees the same chat.
@@ -537,19 +603,21 @@ function queueOrder() {
   return Array.from(queue.entries()).sort((a, b) => queueScore(b[1], now) - queueScore(a[1], now) || a[1].since - b[1].since);
 }
 function admitSession(e) {
-  const miner = world.addMiner(e.address, hashStr(e.address) % 360);
+  const mine = freeMine();
+  if (!mine) return null;
+  const miner = mine.world.addMiner(e.address, hashStr(e.address) % 360);
   if (!miner) return null;
   const id = crypto.randomBytes(12).toString('hex');
-  sessions.set(id, { address: e.address, minerId: miner.id, last: Date.now(), ip: e.ip, hold: e.hold, holdAt: Date.now(), verified: e.proven, joinedAt: Date.now() });
-  console.log('Miner ' + miner.id + ' joined: ' + e.address);
-  return { sessionId: id, minerId: miner.id, verified: e.proven };
+  sessions.set(id, { address: e.address, mine: mine.i, minerId: miner.id, last: Date.now(), ip: e.ip, hold: e.hold, holdAt: Date.now(), verified: e.proven, joinedAt: Date.now() });
+  console.log('Miner ' + miner.id + ' joined Mine ' + (mine.i + 1) + ': ' + e.address);
+  return { sessionId: id, minerId: miner.id, mine: mine.i + 1, verified: e.proven };
 }
 let promoting = false;
 async function promote() {
   if (promoting) return;
   promoting = true;
   try {
-    while (queue.size && world.miners.size < SLOTS) {
+    while (queue.size && freeMine()) {
       const [ticket, e] = queueOrder()[0];
       queue.delete(ticket);
       if (HOLD_REQUIRED) {
@@ -582,22 +650,23 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     setSecurityHeaders(res);
-    if (url.pathname === '/healthz') return send(res, 200, { ok: true, paused, miners: world.miners.size });
+    if (url.pathname === '/healthz') return send(res, 200, { ok: true, paused, miners: totalMiners() });
     if (req.method === 'POST') {
       const origin = req.headers.origin;
       if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}` && !ALLOWED_ORIGINS.includes(origin)) return send(res, 403, { error: 'Bad origin' });
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
       const sip = ipOf(req);
-      if (clients.size >= MAX_STREAMS || (streamsByIp.get(sip) || 0) >= MAX_STREAMS_PER_IP) return send(res, 429, { error: 'Too many open views' });
+      if (totalClients() >= MAX_STREAMS || (streamsByIp.get(sip) || 0) >= MAX_STREAMS_PER_IP) return send(res, 429, { error: 'Too many open views' });
       streamsByIp.set(sip, (streamsByIp.get(sip) || 0) + 1);
       req.on('close', () => { const n = (streamsByIp.get(sip) || 1) - 1; if (n > 0) streamsByIp.set(sip, n); else streamsByIp.delete(sip); });
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
       res.write('retry: 2000\n\n');
-      res.write('data: ' + JSON.stringify(world.worldMsg()) + '\n\n');
-      res.write('data: ' + JSON.stringify(tickMsg([])) + '\n\n');
-      clients.add(res);
-      req.on('close', () => clients.delete(res));
+      const mine = mines[url.searchParams.get('mine') === '2' ? 1 : 0];
+      res.write('data: ' + JSON.stringify(Object.assign({ mine: mine.i + 1 }, mine.world.worldMsg())) + '\n\n');
+      res.write('data: ' + JSON.stringify(tickMsg(mine, [])) + '\n\n');
+      mine.clients.add(res);
+      req.on('close', () => mine.clients.delete(res));
       return;
     }
     if (url.pathname === '/api/state' && req.method === 'GET') return send(res, 200, await state());
@@ -657,7 +726,7 @@ const server = http.createServer(async (req, res) => {
         queue.delete(tk);
       }
       const entry = { address: addr, ip, hold, proven, since: Date.now(), last: Date.now() };
-      if (world.miners.size < SLOTS && queue.size === 0) {
+      if (freeMine() && queue.size === 0) {
         const r = admitSession(entry);
         if (r) return send(res, 200, r);
       }
@@ -731,7 +800,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { verified: true });
     }
     if (url.pathname === '/api/admin-check' && req.method === 'POST') return send(res, isAdmin(req) ? 200 : 403, { admin: isAdmin(req) });
-    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
+    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine' || url.pathname === '/api/mine-open') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
     if (url.pathname === '/api/dry-holder' && req.method === 'POST' && DRY_RUN) {
       const body = await readBody(req);
       dryHolders.set(String(body.address), Math.round((Number(body.amount) || 0) * UI()));
@@ -752,10 +821,25 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/new-mine' && req.method === 'POST') {
       if (inflight > 0) return send(res, 409, { error: 'A payout is still being sent. Try again in a few seconds.' });
-      world.newMap();
-      await buildPool();   // fresh rewards in the new cave, level locks reset
-      world.emit({ e: 'newmine' });
+      mines.forEach((m) => m.world.newMap());
+      await buildPool();   // fresh rewards in the new caves, level locks reset
+      emitAll({ e: 'newmine' });
       console.log('Admin built a new mine');
+      return send(res, 200, await state());
+    }
+    if (url.pathname === '/api/mine-open' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (body.open === false) {
+        mines[1].open = false;
+        if (body.kick) for (const [sid, s2] of Array.from(sessions)) if (s2.mine === 1) kick(sid, 'Mine 2 was closed by the admin. Join again to be placed in an open mine.');
+        settleMines();
+        console.log('Admin closed Mine 2');
+      } else {
+        if (seasonOver()) return send(res, 409, { error: 'The season is over.' });
+        openMine2();
+        promote();
+        console.log('Admin opened Mine 2');
+      }
       return send(res, 200, await state());
     }
     if (url.pathname === '/api/pause' && req.method === 'POST') {
@@ -814,24 +898,29 @@ const server = http.createServer(async (req, res) => {
   setInterval(() => {
     const now = Date.now(), dt = Math.min(0.2, (now - lastT) / 1000);
     lastT = now;
-    if (!seasonOver()) world.tick(dt);
-    if (++n % 2 === 0 && clients.size) {
-      if (world.takeWorldDirty()) broadcast(world.worldMsg());
-      broadcast(tickMsg(world.flush()));
-    } else if (!clients.size) world.flush();
+    n++;
+    for (const mine of mines) {
+      const idle = !mine.open && mine.world.miners.size === 0 && mine.clients.size === 0;
+      if (!seasonOver() && !idle) mine.world.tick(dt);
+      if (n % 2 === 0 && mine.clients.size) {
+        if (mine.world.takeWorldDirty()) broadcast(mine, Object.assign({ mine: mine.i + 1 }, mine.world.worldMsg()));
+        broadcast(mine, tickMsg(mine, mine.world.flush()));
+      } else if (!mine.clients.size) mine.world.flush();
+    }
   }, 50);
   setInterval(() => {
     const now = Date.now();
     for (const [sid, sess] of sessions) if (now - sess.last > 20000) dropSession(sid);
     for (const [tk, e] of queue) if (now - e.last > 20000) queue.delete(tk);
     for (const [tk, r] of queueResults) if (now - r.at > 60000) queueResults.delete(tk);
-    if (SHIFT_MS > 0 && queue.size > 0 && world.miners.size >= SLOTS) {   // full and people are waiting: rotate out whoever has mined longest
+    if (SHIFT_MS > 0 && queue.size > 0 && !freeMine()) {   // full and people are waiting: rotate out whoever has mined longest
       const oldest = Array.from(sessions.entries()).filter(([, s2]) => now - s2.joinedAt > SHIFT_MS).sort((a, b) => a[1].joinedAt - b[1].joinedAt);
       const need = Math.min(queue.size, oldest.length);
       for (let i = 0; i < need; i++) kick(oldest[i][0], 'Removed from the mine: your shift is over and others are waiting. Join the line to come back.');
     }
+    settleMines();
     promote();
-    for (const c of clients) { try { c.write(': keepalive\n\n'); } catch (e) { clients.delete(c); } }
+    for (const mine of mines) for (const c of mine.clients) { try { c.write(': keepalive\n\n'); } catch (e) { mine.clients.delete(c); } }
   }, 5000);
   // Holders are re-checked every minute; a wallet that dropped below the minimum is removed from the mine.
   if (HOLD_REQUIRED) setInterval(async () => {
