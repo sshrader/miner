@@ -260,6 +260,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <button class="btn btn-ghost btn-sm" id="copyAddr" type="button">Copy address</button>
           <button class="btn btn-ghost btn-sm" id="newPoolBtn" type="button" hidden>New pool (admin)</button>
           <button class="btn btn-ghost btn-sm" id="pauseBtn" type="button" hidden>Pause payouts (admin)</button>
+          <button class="btn btn-ghost btn-sm" id="newMineBtn" type="button" hidden>New mine (admin)</button>
         </div>
         <div class="unit" id="devNote"></div>
       </div>
@@ -1132,7 +1133,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   // Admin key comes from the private link (#admin=...). Only the server's check decides who is admin; hiding the button is cosmetic.
   var adminKey = '';
   try {
-    var hm = /admin=([0-9a-fA-F]+)/.exec(location.hash);
+    var hm = /admin=([A-Za-z0-9_-]+)/.exec(location.hash);
     if (hm) { adminKey = hm[1]; sessionStorage.setItem('bbAdmin', adminKey); history.replaceState(null, '', location.pathname + location.search); }
     else adminKey = sessionStorage.getItem('bbAdmin') || '';
   } catch (e) { /* storage blocked: admin link then works until reload */ }
@@ -1385,6 +1386,9 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'topup') {
       log('Reward pool topped up: +' + fmt(e.amt) + ' in ' + e.n + ' new hidden ' + (e.n === 1 ? 'reward' : 'rewards') + '.', 'win');
+      api('/api/state').then(adopt).catch(function () {});
+    } else if (e.e === 'newmine') {
+      log('The admin built a new mine. Everyone is back at the elevator.', 'win');
       api('/api/state').then(adopt).catch(function () {});
     } else if (e.e === 'unlock') {
       log('Level ' + e.lv + ' unlocked: every reward on the level above was found. Miners can dig down.', 'win');
@@ -1889,10 +1893,22 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (o) { o.setAttribute('aria-pressed', o === btn ? 'true' : 'false'); });
     });
   });
-  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
+  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
   $('newPoolBtn').addEventListener('click', function () {
     api('/api/reset-pool', {}).then(function (s) { adopt(s); $('msg').hidden = true; log('New reward pool: ' + fmt(s.poolTotal) + ' in ' + s.rewardsLeft + ' hidden rewards.'); })
       .catch(function (e) { log('Could not reset the pool: ' + e.message, 'sim'); });
+  });
+  var nmArm = null;
+  $('newMineBtn').addEventListener('click', function () {
+    var b = $('newMineBtn');
+    if (!nmArm) {   // first click only arms the button, so a stray click cannot wipe the mine
+      b.textContent = 'Click again to confirm: new map and rewards';
+      nmArm = setTimeout(function () { nmArm = null; b.textContent = 'New mine (admin)'; }, 5000);
+      return;
+    }
+    clearTimeout(nmArm); nmArm = null; b.textContent = 'New mine (admin)';
+    api('/api/new-mine', {}).then(function (s) { adopt(s); log('New mine built: ' + s.rewardsLeft + ' hidden rewards, levels locked again.'); })
+      .catch(function (e) { log('Could not build a new mine: ' + e.message, 'sim'); });
   });
   $('pauseBtn').addEventListener('click', function () {
     api('/api/pause', { paused: !(DEV && DEV.paused) }).then(function (s) { adopt(s); log(s.paused ? 'Payouts paused.' : 'Payouts resumed.'); })

@@ -391,7 +391,9 @@ function createWorld(hooks, opts) {
     claim.fill(0); spawn = st.spawn.map(Number); hardMult = Number(st.hm) || hardMult; worldDirty = true;
     return true;
   }
-  return { exportState, importState, setHardMult, getHardMult: () => hardMult, pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
+  // Builds a brand-new cave right now and sends every miner back to the elevator.
+  function newMap() { genWorld(); miners.forEach(resetMiner); regenT = 0; stats.regens++; worldDirty = true; }
+  return { newMap, exportState, importState, setHardMult, getHardMult: () => hardMult, pickRewardCells, setUnlocked, getUnlocked: () => unlocked, miners, stats, genWorld, addMiner, removeMiner, tick, worldMsg, minersSnap, flush, emit, takeWorldDirty, _grid: grid, _fgrid: fgrid, constants: { X, Z, LV, N, NN } };
 }
 
 module.exports = { createWorld, SLOTS, NN, N };

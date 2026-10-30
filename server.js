@@ -731,7 +731,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { verified: true });
     }
     if (url.pathname === '/api/admin-check' && req.method === 'POST') return send(res, isAdmin(req) ? 200 : 403, { admin: isAdmin(req) });
-    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
+    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
     if (url.pathname === '/api/dry-holder' && req.method === 'POST' && DRY_RUN) {
       const body = await readBody(req);
       dryHolders.set(String(body.address), Math.round((Number(body.amount) || 0) * UI()));
@@ -750,12 +750,21 @@ const server = http.createServer(async (req, res) => {
       if (body.off) muted.delete(a); else { muted.add(a); if (body.kick) for (const [sid, s2] of sessions) if (s2.address === a) kick(sid, 'Removed from the mine by the admin.'); }
       return send(res, 200, { muted: Array.from(muted) });
     }
+    if (url.pathname === '/api/new-mine' && req.method === 'POST') {
+      if (inflight > 0) return send(res, 409, { error: 'A payout is still being sent. Try again in a few seconds.' });
+      world.newMap();
+      await buildPool();   // fresh rewards in the new cave, level locks reset
+      world.emit({ e: 'newmine' });
+      console.log('Admin built a new mine');
+      return send(res, 200, await state());
+    }
     if (url.pathname === '/api/pause' && req.method === 'POST') {
       const body = await readBody(req);
       setPaused(body.paused !== false, 'Paused by the admin');
       return send(res, 200, await state());
     }
     if (url.pathname === '/api/reset-pool' && req.method === 'POST') {
+      if (inflight > 0) return send(res, 409, { error: 'A payout is still being sent. Try again in a few seconds.' });
       await buildPool();
       return send(res, 200, await state());
     }
