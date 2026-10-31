@@ -414,7 +414,7 @@ function saveState() {
       token: runtimeToken ? { mint: TOKEN_MINT, symbol: TOKEN_SYMBOL, minHold: MIN_HOLD_UI, minReward: process.env.MIN_REWARD_TOKENS, maxWallet: MAX_WALLET_PAYOUT_UI, poolTokens: process.env.POOL_TOKENS } : null,
       v: 2, network: NETWORK, wallet: payer.publicKey.toBase58(), mint: TOKEN_MINT || null, savedAt: Date.now(),
       worlds: mines.map((m) => m.world.exportState()), mines: mines.map((m) => ({ open: m.open, unlockedLv: m.unlockedLv })), pool: { total: pool.total, left: pool.left, cells: Array.from(pool.cells.entries()) },
-      avgReward, excess, paused, pauseReason, muted: Array.from(muted), paidBy: Array.from(paidBy.entries()), recentPays: recentPays.slice(),
+      avgReward, excess, visits, paused, pauseReason, muted: Array.from(muted), paidBy: Array.from(paidBy.entries()), recentPays: recentPays.slice(),
     };
     fs.mkdirSync(path.dirname(path.resolve(STATE_FILE)), { recursive: true });
     const tmp = STATE_FILE + '.tmp';
@@ -447,6 +447,7 @@ async function loadState() {
     });
     recomputeUnlock();
     paused = !!st.paused; pauseReason = st.pauseReason || '';
+    if (st.visits && typeof st.visits === 'object') { visits.total = Number(st.visits.total) || 0; visits.days = st.visits.days || {}; }
     (st.muted || []).forEach((a) => muted.add(a));
     (st.paidBy || []).forEach(([a, r]) => paidBy.set(a, r));
     (st.recentPays || []).forEach((r) => recentPays.push(r));
@@ -674,6 +675,20 @@ function setSecurityHeaders(res) {
 const streamsByIp = new Map();
 const MAX_STREAMS_PER_IP = Number(process.env.MAX_STREAMS_PER_IP) || 6, MAX_STREAMS = Number(process.env.MAX_STREAMS) || 400;
 const muted = new Set();   // wallet addresses that may not chat
+// Page visits, for the admin only. Only counts are kept; an address is hashed with a daily random salt just to tell visitors apart, and the hashes are never saved.
+const visits = { total: 0, days: {} };   // days: 'YYYY-MM-DD' -> { views, uniq }
+const uniqToday = new Set(); let uniqDay = '';
+const VSALT = crypto.randomBytes(8).toString('hex');
+function countVisit(req) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (day !== uniqDay) { uniqDay = day; uniqToday.clear(); }
+  const d = visits.days[day] || (visits.days[day] = { views: 0, uniq: 0 });
+  visits.total++; d.views++;
+  const h = crypto.createHash('sha256').update(VSALT + day + ipOf(req)).digest('hex').slice(0, 16);
+  if (!uniqToday.has(h)) { uniqToday.add(h); d.uniq++; }
+  const keys = Object.keys(visits.days).sort();
+  while (keys.length > 60) delete visits.days[keys.shift()];
+}
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
@@ -828,7 +843,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { verified: true });
     }
     if (url.pathname === '/api/admin-check' && req.method === 'POST') return send(res, isAdmin(req) ? 200 : 403, { admin: isAdmin(req) });
-    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine' || url.pathname === '/api/mine-open' || url.pathname === '/api/set-token') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
+    if ((url.pathname === '/api/dry-fund' || url.pathname === '/api/dry-holder' || url.pathname === '/api/reset-pool' || url.pathname === '/api/pause' || url.pathname === '/api/mute' || url.pathname === '/api/new-mine' || url.pathname === '/api/mine-open' || url.pathname === '/api/set-token' || url.pathname === '/api/stats' || url.pathname === '/api/admin-say') && req.method === 'POST' && !isAdmin(req)) return send(res, 403, { error: 'Admin only' });
     if (url.pathname === '/api/dry-holder' && req.method === 'POST' && DRY_RUN) {
       const body = await readBody(req);
       dryHolders.set(String(body.address), Math.round((Number(body.amount) || 0) * UI()));
@@ -871,6 +886,21 @@ const server = http.createServer(async (req, res) => {
       console.log('Admin set the reward token: ' + TOKEN_SYMBOL + ' ' + TOKEN_MINT + ' (' + DEC + ' decimals)');
       return send(res, 200, await state());
     }
+    if (url.pathname === '/api/stats' && req.method === 'POST') {
+      const today = new Date().toISOString().slice(0, 10);
+      const days = Object.keys(visits.days).sort().slice(-14).map((d) => ({ day: d, views: visits.days[d].views, uniq: visits.days[d].uniq }));
+      return send(res, 200, { visits: { total: visits.total, today: visits.days[today] || { views: 0, uniq: 0 }, days }, live: { watching: totalClients(), miners: totalMiners(), queue: queue.size } });
+    }
+    if (url.pathname === '/api/admin-say' && req.method === 'POST') {
+      const body = await readBody(req);
+      const text = String(body.text || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 200);
+      if (!text) return send(res, 400, { error: 'Empty message' });
+      chat.push({ id: ++chatSeq, addr: '', admin: true, verified: false, text, ts: Date.now() });
+      if (chat.length > 100) chat.shift();
+      emitAll({ e: 'announce', msg: text });
+      console.log('Admin message: ' + text);
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === '/api/mine-open' && req.method === 'POST') {
       const body = await readBody(req);
       if (body.open === false) {
@@ -897,6 +927,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await state());
     }
     if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) countVisit(req);
     let rel = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
     const file = path.normalize(path.join(PUBLIC_DIR, rel));
     if (!file.startsWith(PUBLIC_DIR + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); return res.end('Not found'); }

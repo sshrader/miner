@@ -72,6 +72,8 @@ button.chip:hover { border-color: var(--accent); }
 .chatlog li.me .who { color: var(--gold); }
 .chatlog .ok { color: var(--good); }
 .chatlog li.empty { color: var(--muted); }
+.chatlog li.adm { background: rgba(245, 184, 58, 0.12); border-left: 3px solid var(--gold); padding: 3px 6px; }
+.chatlog li.adm .who { color: var(--bg, #0b0a10); background: var(--gold); border-radius: 3px; padding: 1px 5px; font-weight: 700; }
 .chatform { display: flex; gap: 8px; }
 .chatform input { flex: 1 1 auto; min-width: 0; min-height: 38px; background: var(--panel-2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 0 10px; font: 14px var(--font-body); }
 .chatform input:disabled { opacity: 0.5; }
@@ -282,6 +284,11 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
           <div class="unit" id="tkMsg">This checks the address on the network, removes everyone from the mine, and builds a new pool in this token from what the reward wallet holds.</div>
         </form>
         <div class="unit" id="devNote"></div>
+        <div id="adminTools" hidden>
+          <span class="lbl">Visitors (admin)</span>
+          <div class="unit" id="visitTxt">Loading...</div>
+          <form class="chatform" id="adminSayForm"><input id="adminSay" maxlength="200" autocomplete="off" placeholder="Message to everyone (shows as ADMIN)" aria-label="Admin message"><button class="btn btn-sm" type="submit">Send</button></form>
+        </div>
       </div>
 
       <div class="card">
@@ -1443,6 +1450,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     } else if (e.e === 'topup') {
       log('Reward pool topped up: +' + fmt(e.amt) + ' in ' + e.n + ' new hidden ' + (e.n === 1 ? 'reward' : 'rewards') + '.', 'win');
       api('/api/state').then(adopt).catch(function () {});
+    } else if (e.e === 'announce') {
+      log('ADMIN: ' + e.msg, 'win');
     } else if (e.e === 'token') {
       log('The reward token is now ' + e.sym + '. Everyone left the mine; join again to mine for it.', 'win');
       api('/api/state').then(adopt).catch(function () {});
@@ -1495,11 +1504,12 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       var li = document.createElement('li');
       var mine = player && m.addr === player.addr;
       if (mine) li.className = 'me';
-      var who = document.createElement('span'); who.className = 'who'; who.textContent = shortAddr(m.addr);
+      if (m.admin) li.className = 'adm';
+      var who = document.createElement('span'); who.className = 'who'; who.textContent = m.admin ? 'ADMIN' : shortAddr(m.addr);
       if (m.verified) { var ck = document.createElement('span'); ck.className = 'ok'; ck.textContent = ' \u2713'; ck.title = 'Wallet ownership verified by signature'; who.appendChild(ck); }
       var tx = document.createElement('span'); tx.textContent = m.text;
       li.appendChild(who); li.appendChild(tx); ul.appendChild(li);
-      bots.forEach(function (b) { if (b.addr === m.addr) { b.bub.textContent = m.text; b.sayUntil = performance.now() + 7000; } });
+      if (!m.admin) bots.forEach(function (b) { if (b.addr === m.addr) { b.bub.textContent = m.text; b.sayUntil = performance.now() + 7000; } });
     });
     while (ul.children.length > 60) ul.removeChild(ul.firstChild);
     if (stick) ul.scrollTop = ul.scrollHeight;
@@ -1952,7 +1962,7 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
       Array.prototype.forEach.call($('lvlBtns').querySelectorAll('button'), function (o) { o.setAttribute('aria-pressed', o === btn ? 'true' : 'false'); });
     });
   });
-  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; $('mine2Btn').hidden = false; $('tokenBtn').hidden = false; renderMineTabs(); }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
+  if (adminKey) api('/api/admin-check', {}).then(function () { $('newPoolBtn').hidden = false; $('pauseBtn').hidden = false; $('newMineBtn').hidden = false; $('mine2Btn').hidden = false; $('tokenBtn').hidden = false; $('adminTools').hidden = false; loadVisits(); setInterval(loadVisits, 30000); renderMineTabs(); }).catch(function () { adminKey = ''; try { sessionStorage.removeItem('bbAdmin'); } catch (e) { /* ignore */ } });
   $('newPoolBtn').addEventListener('click', function () {
     api('/api/reset-pool', {}).then(function (s) { adopt(s); $('msg').hidden = true; log('New reward pool: ' + fmt(s.poolTotal) + ' in ' + s.rewardsLeft + ' hidden rewards.'); })
       .catch(function (e) { log('Could not reset the pool: ' + e.message, 'sim'); });
@@ -1968,6 +1978,19 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
     clearTimeout(nmArm); nmArm = null; b.textContent = 'New mine (admin)';
     api('/api/new-mine', {}).then(function (s) { adopt(s); log('New mine built: ' + s.rewardsLeft + ' hidden rewards, levels locked again.'); })
       .catch(function (e) { log('Could not build a new mine: ' + e.message, 'sim'); });
+  });
+  function loadVisits() {
+    api('/api/stats', {}).then(function (r) {
+      var v = r.visits, l = r.live;
+      $('visitTxt').textContent = 'Page visits: ' + v.total + ' total. Today: ' + v.today.views + ' (' + v.today.uniq + ' unique). Right now: ' + l.watching + ' watching, ' + l.miners + ' mining, ' + l.queue + ' waiting. Last days: ' + v.days.slice(-7).map(function (d) { return d.day.slice(5) + ' ' + d.views + '/' + d.uniq; }).join(', ') + ' (views/unique).';
+    }).catch(function () { $('visitTxt').textContent = 'Could not load visit counts.'; });
+  }
+  $('adminSayForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var inp = $('adminSay'), text = inp.value.trim();
+    if (!text) return;
+    inp.value = '';
+    api('/api/admin-say', { text: text }).then(pollChat).catch(function (e) { log('Could not send: ' + e.message, 'sim'); });
   });
   $('tokenBtn').addEventListener('click', function () { $('tokenForm').hidden = !$('tokenForm').hidden; });
   $('tokenForm').addEventListener('submit', function (ev) {

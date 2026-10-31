@@ -76,6 +76,13 @@ Once the coin exists you do not have to redeploy. Open `/#admin=<ADMIN_KEY>`, pr
 - The same call is `POST /api/set-token` with the admin key and `{ mint, symbol, minHold, minReward, maxWallet, poolTokens, replace }`.
 - Anyone holding the admin key can point payouts at a different token, so keep the key private. The reward wallet only ever holds what you put in it.
 
+## Visit counts and admin messages
+
+Both live in the admin card (open `/#admin=<ADMIN_KEY>`); visitors never see the counts.
+
+- **Visitors:** each load of the main page is counted, with a rough unique-visitor figure per day (a visitor is told apart by a hash of their connection address plus a daily random salt; the hashes are never saved or shown). The totals and the last 60 days are kept in `STATE_FILE`. It also shows how many people are watching, mining and waiting right now. Bots and refreshes count as visits, and a restart can count some of the day's visitors twice. `POST /api/stats` with the admin key returns the same numbers.
+- **Admin message:** type in the box under the visit counts and press Send. It appears in everyone's chat with an ADMIN badge, and as a line in their activity log. It can contain links (player chat cannot). `POST /api/admin-say` with `{ text }`, max 200 characters.
+
 ## Mine 2 (overflow mine)
 
 There are two mines sharing one reward pool. Mine 1 is always open. Mine 2 starts closed; the admin opens it with the **Open Mine 2 (admin)** button (or `POST /api/mine-open {"open": true}` with the admin key). Open it and about half of the hidden rewards on every level move into it. People are placed in Mine 1 first, and in Mine 2 only when Mine 1 is full; nobody chooses. Each mine has its own cave, level locks and block hardness, and a viewer can switch the watched mine with the tabs under "Miners underground".
