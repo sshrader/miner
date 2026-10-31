@@ -931,7 +931,8 @@ footer { margin-top: 28px; color: var(--muted); font-size: 13px; max-width: 80ch
   function timeStr() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 
   /* ---------- storage ---------- */
-  function key() { return 'bedrock-bots:' + (DEV ? 'dev' : 'v2') + ':' + (session ? session.id : 'none'); }
+  // The saved tally is kept per asset: amounts are in different units for SOL and for each token, so they must never mix.
+  function key() { return 'bedrock-bots:' + (DEV ? 'dev:' + (DEV.mint || 'sol') : 'v2') + ':' + (session ? session.id : 'none'); }
   function save() {
     if (!session) return;
     try { localStorage.setItem(key(), JSON.stringify(stats)); } catch (e) { /* storage unavailable */ }
